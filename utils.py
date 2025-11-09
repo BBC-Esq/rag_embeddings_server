@@ -4,7 +4,6 @@ import os
 import shutil
 from pathlib import Path
 import logging
-import re
 from http import HTTPStatus
 
 from fastapi import HTTPException
@@ -34,35 +33,6 @@ def clean_triton_cache():
     else:
         logger.debug("No Triton cache found to clean")
         return True
-
-
-def clean_text_for_json(text: str) -> str | None:
-    if not text:
-        return ""
-
-    text = "".join(
-        char
-        for char in text
-        if char == "\n" or char == "\t" or (32 <= ord(char) < 127)
-    )
-
-    text = text.replace("\t", " ")
-
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    text = "\n".join(line.strip() for line in text.split("\n"))
-
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    text = text.strip()
-    return text
-
-
-def preprocess_text(text: str) -> str:
-    cleaned_text = clean_text_for_json(text)
-    if not cleaned_text:
-        raise ValueError("Text is empty after cleaning.")
-    return cleaned_text
 
 
 def validate_text_length(

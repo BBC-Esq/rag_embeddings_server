@@ -13,9 +13,9 @@ from schemas import (
     TextRequest,
     TextResponse,
 )
+from text_cleaning import preprocess_text
 from utils import (
     handle_exception,
-    preprocess_text,
     validate_text_length,
 )
 
@@ -95,7 +95,7 @@ async def create_batch_text_embeddings(request: BatchTextRequest):
 @router.post("/api/v1/validate/text")
 async def validate_text(request: TextRequest):
     try:
-        processed_text = preprocess_text(request.text)
+        processed_text = preprocess_text(request.text, runtime_settings.text_cleaning_mode)
         return {
             "id": request.id,
             "original_text": request.text,

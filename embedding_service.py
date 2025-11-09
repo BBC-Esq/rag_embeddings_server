@@ -9,9 +9,10 @@ from transformers import AutoTokenizer
 
 from config import runtime_settings
 from schemas import ChunkEmbedding, TextResponse
-from utils import logger, preprocess_text
+from text_cleaning import preprocess_text
+from utils import logger
 
-torch.set_float32_matmul_precision("high") # highest, high or medium
+torch.set_float32_matmul_precision("highest") # highest, high or medium
 thread_local = threading.local()
 
 
@@ -47,7 +48,7 @@ class EmbeddingService:
                 logger.info(f"Model supports prompts: {list(model.prompts.keys())}")
             else:
                 logger.info("Model does not support prompts")
-            
+
             elapsed = time.time() - start_time
             logger.info(f"Model loaded successfully on {device} in {elapsed:.2f}s")
         except Exception as e:
@@ -63,7 +64,7 @@ class EmbeddingService:
         chunks = []
         start = 0
         text_length = len(text)
-        
+
         while start < text_length:
             end = start + self.chunk_size
             chunk = text[start:end]
@@ -73,11 +74,11 @@ class EmbeddingService:
             
             if start >= text_length:
                 break
-        
+
         return chunks if chunks else [text]
 
     async def generate_query_embedding(self, text: str) -> list[float]:
-        processed_text = preprocess_text(text)
+        processed_text = preprocess_text(text, runtime_settings.text_cleaning_mode)
 
         embedding = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -99,7 +100,10 @@ class EmbeddingService:
 
         start_time = time.time()
 
-        preprocessed_texts = {doc_id: preprocess_text(text) for doc_id, text in texts.items()}
+        preprocessed_texts = {
+            doc_id: preprocess_text(text, runtime_settings.text_cleaning_mode) 
+            for doc_id, text in texts.items()
+        }
 
         all_chunks = []
         chunk_counts = []

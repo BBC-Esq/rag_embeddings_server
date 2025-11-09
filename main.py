@@ -6,13 +6,13 @@ from pathlib import Path
 def set_cuda_paths():
     if platform.system() != "Windows":
         return
-    
+
     venv_base = Path(sys.executable).parent.parent
     nvidia_base = venv_base / 'Lib' / 'site-packages' / 'nvidia'
-    
+
     if not nvidia_base.exists():
         return
-    
+
     cuda_path_runtime = nvidia_base / 'cuda_runtime' / 'bin'
     cuda_path_runtime_lib = nvidia_base / 'cuda_runtime' / 'lib' / 'x64'
     cuda_path_runtime_include = nvidia_base / 'cuda_runtime' / 'include'
@@ -20,7 +20,7 @@ def set_cuda_paths():
     cudnn_path = nvidia_base / 'cudnn' / 'bin'
     nvrtc_path = nvidia_base / 'cuda_nvrtc' / 'bin'
     nvcc_path = nvidia_base / 'cuda_nvcc' / 'bin'
-    
+
     paths_to_add = [
         str(cuda_path_runtime),
         str(cuda_path_runtime_lib),
@@ -30,11 +30,11 @@ def set_cuda_paths():
         str(nvrtc_path),
         str(nvcc_path),
     ]
-    
+
     current_value = os.environ.get('PATH', '')
     new_value = os.pathsep.join(paths_to_add + ([current_value] if current_value else []))
     os.environ['PATH'] = new_value
-    
+
     triton_cuda_path = nvidia_base / 'cuda_runtime'
     current_cuda_path = os.environ.get('CUDA_PATH', '')
     new_cuda_path = os.pathsep.join([str(triton_cuda_path)] + ([current_cuda_path] if current_cuda_path else []))
@@ -66,7 +66,7 @@ sentry_sdk.init(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await load_embedding_service()
-    
+
     try:
         yield
     finally:

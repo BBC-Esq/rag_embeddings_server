@@ -1,6 +1,7 @@
 from enum import Enum
 from pydantic import Field
 from pydantic_settings import BaseSettings
+from text_cleaning import TextCleaningMode
 
 
 class EmbeddingModel(str, Enum):
@@ -32,14 +33,17 @@ class Settings(BaseSettings):
     max_workers: int = 4
     pool_timeout: int = 3600
     force_cpu: bool = False
-    
+    text_cleaning_mode: TextCleaningMode = Field(
+        TextCleaningMode.ASCII_ONLY,
+        description="Text cleaning mode"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
 
 
 settings = Settings()
-
 
 class RuntimeSettings:
     def __init__(self):
@@ -55,7 +59,8 @@ class RuntimeSettings:
         self.max_workers = settings.max_workers
         self.pool_timeout = settings.pool_timeout
         self.force_cpu = settings.force_cpu
-    
+        self.text_cleaning_mode = settings.text_cleaning_mode
+
     def update(self, **kwargs):
         for key, value in kwargs.items():
             if hasattr(self, key):

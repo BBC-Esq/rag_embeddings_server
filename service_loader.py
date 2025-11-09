@@ -13,7 +13,7 @@ from utils import logger
 async def load_embedding_service(custom_settings=None):
     max_retries = 3
     retry_delay = 5
-    
+
     settings_to_use = custom_settings if custom_settings else runtime_settings
 
     for attempt in range(max_retries):
@@ -21,13 +21,13 @@ async def load_embedding_service(custom_settings=None):
             logger.info(
                 f"Attempting to initialize embedding service (attempt {attempt + 1}/{max_retries})"
             )
-            
+
             model_name = settings_to_use.transformer_model_name
             if hasattr(model_name, 'value'):
                 model_name = model_name.value
-            
+
             logger.info(f"Loading model: {model_name}")
-            
+
             model = SentenceTransformer(
                 model_name,
                 revision=settings_to_use.transformer_model_version,
@@ -40,9 +40,9 @@ async def load_embedding_service(custom_settings=None):
                     "model_max_length": 8192
                 }
             )
-            
+
             tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
+
             app_state.embedding_service = EmbeddingService(
                 model=model,
                 tokenizer=tokenizer,
@@ -51,14 +51,14 @@ async def load_embedding_service(custom_settings=None):
                 processing_batch_size=settings_to_use.processing_batch_size,
                 max_workers=settings_to_use.max_workers,
             )
-            
+
             if custom_settings:
                 runtime_settings.update(**{
                     k: getattr(custom_settings, k) 
                     for k in dir(custom_settings) 
                     if not k.startswith('_')
                 })
-            
+
             logger.info(f"Embedding service initialized successfully with model: {model_name}")
             return True
         except Exception as e:

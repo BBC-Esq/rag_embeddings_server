@@ -20,16 +20,16 @@ class Settings(BaseSettings):
         description="Version of the transformer model to use",
     )
     chunk_size: int = Field(
-        2048, ge=100, le=100000, description="Chunk size in characters"
+        1000, ge=100, le=100000, description="Chunk size in characters"
     )
     chunk_overlap: int = Field(
-        200, ge=0, le=10000, description="Chunk overlap in characters"
+        250, ge=0, le=10000, description="Chunk overlap in characters"
     )
-    min_text_length: int = 1
+    min_text_length: int = 10
     max_query_length: int = 1000
     max_text_length: int = 10_000_000
     max_batch_size: int = 100
-    processing_batch_size: int = 8
+    processing_batch_size: int = 12
     max_workers: int = 4
     pool_timeout: int = 3600
     force_cpu: bool = False

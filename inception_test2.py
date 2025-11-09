@@ -258,7 +258,7 @@ class InceptionGUI(QMainWindow):
         tabs = QTabWidget()
 
         tabs.addTab(self.create_document_tab(), "Document Embedding")
-        tabs.addTab(self.create_query_tab(), "Query & Search")
+        tabs.addTab(self.create_query_tab(), "Query and Search")
         tabs.addTab(self.create_batch_tab(), "Batch Processing")
 
         return tabs
@@ -731,7 +731,7 @@ class InceptionGUI(QMainWindow):
 
         similarities.sort(key=lambda x: x['similarity'], reverse=True)
 
-        num_results = min(5, len(similarities))
+        num_results = min(6, len(similarities))
         self.similarity_results = similarities[:num_results]
 
         self.similarity_table.setRowCount(num_results)

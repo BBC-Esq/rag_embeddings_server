@@ -16,9 +16,6 @@ class ReloadSettings(BaseModel):
     transformer_model_version: str
     chunk_size: int
     chunk_overlap: int
-    min_text_length: int
-    max_query_length: int
-    max_text_length: int
     processing_batch_size: int
     max_workers: int
     force_cpu: bool
@@ -119,9 +116,6 @@ async def get_current_settings():
         "transformer_model_version": runtime_settings.transformer_model_version,
         "chunk_size": runtime_settings.chunk_size,
         "chunk_overlap": runtime_settings.chunk_overlap,
-        "min_text_length": runtime_settings.min_text_length,
-        "max_query_length": runtime_settings.max_query_length,
-        "max_text_length": runtime_settings.max_text_length,
         "processing_batch_size": runtime_settings.processing_batch_size,
         "max_workers": runtime_settings.max_workers,
         "force_cpu": runtime_settings.force_cpu,

@@ -5,14 +5,16 @@ from text_cleaning import TextCleaningMode
 
 
 class EmbeddingModel(str, Enum):
-    MODERNBERT = "freelawproject/modernbert-embed-base_finetune_512"
-    QWEN3_small = "Qwen/Qwen3-Embedding-0.6B"
-    QWEN_medium = "Qwen/Qwen3-Embedding-4B"
+    FREELAW_MODERNBERT_512 = "freelawproject/modernbert-embed-base_finetune_512"
+    FREELAW_MODERNBERT_8192 = "freelawproject/modernbert-embed-base_finetune_8192"
+    QWEN3_SMALL = "Qwen/Qwen3-Embedding-0.6B"
+    QWEN3_MEDIUM = "Qwen/Qwen3-Embedding-4B"
+    QWEN3_LARGE = "Qwen/Qwen3-Embedding-8B"
 
 
 class Settings(BaseSettings):
     transformer_model_name: EmbeddingModel = Field(
-        EmbeddingModel.MODERNBERT,
+        EmbeddingModel.QWEN3_SMALL,
         description="Name of the transformer model to use",
     )
     transformer_model_version: str = Field(
@@ -26,14 +28,12 @@ class Settings(BaseSettings):
         250, ge=0, le=10000, description="Chunk overlap in characters"
     )
     min_text_length: int = 10
-    max_query_length: int = 1000
-    max_text_length: int = 10_000_000
     processing_batch_size: int = 12
     max_workers: int = 4
     pool_timeout: int = 3600
     force_cpu: bool = False
     text_cleaning_mode: TextCleaningMode = Field(
-        TextCleaningMode.ASCII_ONLY,
+        TextCleaningMode.UNICODE_SAFE,
         description="Text cleaning mode"
     )
 
@@ -51,8 +51,6 @@ class RuntimeSettings:
         self.chunk_size = settings.chunk_size
         self.chunk_overlap = settings.chunk_overlap
         self.min_text_length = settings.min_text_length
-        self.max_query_length = settings.max_query_length
-        self.max_text_length = settings.max_text_length
         self.processing_batch_size = settings.processing_batch_size
         self.max_workers = settings.max_workers
         self.pool_timeout = settings.pool_timeout

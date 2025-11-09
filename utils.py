@@ -62,26 +62,13 @@ def extract_text_from_file(content: bytes, filename: str) -> str:
         raise ValueError(f"Failed to extract text from {filename}: {str(e)}")
 
 
-def validate_text_length(
-    text: str, endpoint: str, doc_id: int | None = None
-) -> None:
+def validate_text_length(text: str, endpoint: str, doc_id: int | None = None) -> None:
     text_length = len(text.strip())
-    if text_length < runtime_settings.min_text_length:
-        error_msg = f"Text length ({text_length}) below minimum ({runtime_settings.min_text_length})"
+    if text_length < 10:
+        error_msg = f"Text length ({text_length}) below minimum (10)"
         if doc_id is not None:
             error_msg = f"Document {doc_id}: {error_msg}"
         raise ValueError(error_msg)
-
-    max_length = (
-        runtime_settings.max_query_length
-        if endpoint == "query"
-        else runtime_settings.max_text_length
-    )
-    label = "Query" if endpoint == "query" else "Text"
-    if text_length > max_length:
-        raise ValueError(
-            f"{label} length ({text_length}) exceeds maximum ({max_length})"
-        )
 
 
 def handle_exception(e: Exception, endpoint: str) -> None:

@@ -49,7 +49,7 @@ class InceptionGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Inception Embedding Test Suite")
-        self.setGeometry(100, 100, 1600, 900)
+        self.setGeometry(100, 100, 1100, 900)
 
         self.health_status = None
         self.current_settings = None
@@ -101,7 +101,7 @@ class InceptionGUI(QMainWindow):
         right_panel = self.create_main_content()
         splitter.addWidget(right_panel)
 
-        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
 
         self.statusBar().showMessage("Ready")
@@ -130,8 +130,10 @@ class InceptionGUI(QMainWindow):
         self.model_combo = QComboBox()
         self.model_combo.addItems([
             "freelawproject/modernbert-embed-base_finetune_512",
+            "freelawproject/modernbert-embed-base_finetune_8192",
             "Qwen/Qwen3-Embedding-0.6B",
-            "Qwen/Qwen3-Embedding-4B"
+            "Qwen/Qwen3-Embedding-4B",
+            "Qwen/Qwen3-Embedding-8B"
         ])
         self.model_combo.currentTextChanged.connect(self.settings_changed)
         model_layout.addWidget(QLabel("Embedding Model:"))
@@ -160,35 +162,6 @@ class InceptionGUI(QMainWindow):
 
         params_group.setLayout(params_layout)
         layout.addWidget(params_group)
-
-        constraints_group = QGroupBox("Text Constraints")
-        constraints_layout = QVBoxLayout()
-
-        self.min_text_spin = QSpinBox()
-        self.min_text_spin.setRange(1, 1000)
-        self.min_text_spin.setValue(1)
-        self.min_text_spin.valueChanged.connect(self.settings_changed)
-        constraints_layout.addWidget(QLabel("Min Text Length:"))
-        constraints_layout.addWidget(self.min_text_spin)
-
-        self.max_query_spin = QSpinBox()
-        self.max_query_spin.setRange(100, 10000)
-        self.max_query_spin.setValue(1000)
-        self.max_query_spin.setSingleStep(100)
-        self.max_query_spin.valueChanged.connect(self.settings_changed)
-        constraints_layout.addWidget(QLabel("Max Query Length:"))
-        constraints_layout.addWidget(self.max_query_spin)
-
-        self.max_text_spin = QSpinBox()
-        self.max_text_spin.setRange(1000, 100000000)
-        self.max_text_spin.setValue(10000000)
-        self.max_text_spin.setSingleStep(100000)
-        self.max_text_spin.valueChanged.connect(self.settings_changed)
-        constraints_layout.addWidget(QLabel("Max Text Length:"))
-        constraints_layout.addWidget(self.max_text_spin)
-
-        constraints_group.setLayout(constraints_layout)
-        layout.addWidget(constraints_group)
 
         processing_group = QGroupBox("Processing Settings")
         processing_layout = QVBoxLayout()
@@ -525,9 +498,6 @@ class InceptionGUI(QMainWindow):
 
         self.chunk_size_spin.setValue(settings.get('chunk_size', 2048))
         self.chunk_overlap_spin.setValue(settings.get('chunk_overlap', 200))
-        self.min_text_spin.setValue(settings.get('min_text_length', 1))
-        self.max_query_spin.setValue(settings.get('max_query_length', 1000))
-        self.max_text_spin.setValue(settings.get('max_text_length', 10000000))
         self.processing_batch_spin.setValue(settings.get('processing_batch_size', 8))
         self.max_workers_spin.setValue(settings.get('max_workers', 4))
         self.force_cpu_check.setChecked(settings.get('force_cpu', False))
@@ -563,9 +533,6 @@ class InceptionGUI(QMainWindow):
             "transformer_model_version": "main",
             "chunk_size": self.chunk_size_spin.value(),
             "chunk_overlap": self.chunk_overlap_spin.value(),
-            "min_text_length": self.min_text_spin.value(),
-            "max_query_length": self.max_query_spin.value(),
-            "max_text_length": self.max_text_spin.value(),
             "processing_batch_size": self.processing_batch_spin.value(),
             "max_workers": self.max_workers_spin.value(),
             "force_cpu": self.force_cpu_check.isChecked(),

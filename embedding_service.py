@@ -12,7 +12,10 @@ from metrics import CHUNK_COUNT, MODEL_LOAD_TIME
 from schemas import ChunkEmbedding, TextResponse
 from utils import logger, preprocess_text
 
-torch.set_float32_matmul_precision("high")
+torch.set_float32_matmul_precision("highest")
+# "highest"  # Full float32 precision (slowest, most accurate)
+# "high"     # TF32 on Ampere+ GPUs (faster, minimal accuracy loss) ← You're using this
+# "medium"   # Even lower precision (fastest, more accuracy loss)
 thread_local = threading.local()
 
 
@@ -80,25 +83,11 @@ class EmbeddingService:
     async def generate_query_embedding(self, text: str) -> list[float]:
         processed_text = preprocess_text(text)
 
-        prompt_name = None
-        if (self.supports_prompts and 
-            runtime_settings.use_query_prompt and 
-            runtime_settings.query_prompt_name):
-            if runtime_settings.query_prompt_name in self.model.prompts:
-                prompt_name = runtime_settings.query_prompt_name
-                logger.debug(f"Using query prompt: {runtime_settings.query_prompt_name}")
-            else:
-                logger.warning(
-                    f"Query prompt '{runtime_settings.query_prompt_name}' not found in model. "
-                    f"Available prompts: {list(self.model.prompts.keys())}"
-                )
-
         embedding = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.gpu_model.encode(
+            lambda: self.gpu_model.encode_query(
                 [processed_text],
                 batch_size=1,
-                prompt_name=prompt_name,
                 normalize_embeddings=True
             ),
         )
@@ -142,25 +131,12 @@ class EmbeddingService:
             f"Producing {len(all_chunks)} chunks took {chunk_time - start_time:.2f} seconds"
         )
 
-        prompt_name = None
-        if (self.supports_prompts and 
-            runtime_settings.use_document_prompt and 
-            runtime_settings.document_prompt_name):
-            if runtime_settings.document_prompt_name in self.model.prompts:
-                prompt_name = runtime_settings.document_prompt_name
-                logger.debug(f"Using document prompt: {runtime_settings.document_prompt_name}")
-            else:
-                logger.warning(
-                    f"Document prompt '{runtime_settings.document_prompt_name}' not found in model. "
-                    f"Available prompts: {list(self.model.prompts.keys())}"
-                )
-
         embeddings = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.gpu_model.encode(
+            lambda: self.gpu_model.encode_document(
                 all_chunks,
                 batch_size=self.processing_batch_size,
-                prompt_name=prompt_name
+                normalize_embeddings=True
             ),
         )
 

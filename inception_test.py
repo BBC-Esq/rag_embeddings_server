@@ -102,14 +102,7 @@ with st.sidebar:
                 st.markdown(f"**Available Prompts:** {', '.join(available_prompts)}")
         
         st.markdown(f"**GPU Available:** {health.get('gpu_available', False)}")
-        
-        if health.get('prompt_config'):
-            prompt_config = health['prompt_config']
-            st.markdown("**Prompt Config:**")
-            if prompt_config.get('use_query_prompt'):
-                st.markdown(f"  - Query: `{prompt_config.get('query_prompt_name')}`")
-            if prompt_config.get('use_document_prompt'):
-                st.markdown(f"  - Document: `{prompt_config.get('document_prompt_name')}`")
+
     else:
         st.markdown("**Status:** :red[OFFLINE]")
     
@@ -119,7 +112,8 @@ with st.sidebar:
     
     available_models = [
         "freelawproject/modernbert-embed-base_finetune_512",
-        "Qwen/Qwen3-Embedding-0.6B"
+        "Qwen/Qwen3-Embedding-0.6B",
+        "Qwen/Qwen3-Embedding-4B"
     ]
     
     current_index = 0
@@ -235,10 +229,6 @@ with st.sidebar:
     new_config = {
         "transformer_model_name": selected_model,
         "transformer_model_version": "main",
-        "use_query_prompt": True,
-        "query_prompt_name": "query",
-        "use_document_prompt": False,
-        "document_prompt_name": None,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
         "min_text_length": min_text_length,
@@ -260,7 +250,7 @@ with st.sidebar:
     
     if settings_changed:
         st.warning("⚠️ Settings have been modified")
-        if st.button("🔄 Apply Changes & Reload Service", type="primary", use_container_width=True):
+        if st.button("🔄 Apply Changes & Reload Service", type="primary", width="stretch"):
             with st.spinner("Reloading service with new settings..."):
                 result = reload_service(new_config)
                 if result and result.get('status') == 'success':
@@ -270,7 +260,7 @@ with st.sidebar:
                 else:
                     st.error(f"❌ Failed to reload service")
     
-    if st.button("📋 Copy Config as JSON", use_container_width=True):
+    if st.button("📋 Copy Config as JSON", width="stretch"):
         st.code(json.dumps(new_config, indent=2))
 
 tab1, tab2, tab3, tab4 = st.tabs(["📄 Document Embedding", "🔍 Query & Search", "📦 Batch Processing", "📊 Analytics"])
@@ -360,7 +350,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🚀 Generate Embeddings", type="primary", use_container_width=True):
+        if st.button("🚀 Generate Embeddings", type="primary", width="stretch"):
             if document_text:
                 with st.spinner("Processing document..."):
                     start_time = time.time()
@@ -378,7 +368,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
                 st.warning("Please provide document text")
     
     with col2:
-        if st.button("🗑️ Clear Results", use_container_width=True):
+        if st.button("🗑️ Clear Results", width="stretch"):
             if 'doc_embeddings' in st.session_state:
                 del st.session_state.doc_embeddings
             if 'doc_text' in st.session_state:
@@ -438,7 +428,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
                     "Embedding Std": f"{emb_array.std():.4f}",
                     "Embedding Norm": f"{np.linalg.norm(emb_array):.4f}"
                 })
-            st.dataframe(stats_data, use_container_width=True)
+            st.dataframe(stats_data, width="stretch")
 
 with tab2:
     st.header("Query Embedding & Document Search")
@@ -452,7 +442,7 @@ with tab2:
     
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("🔍 Embed Query", type="primary", use_container_width=True):
+        if st.button("🔍 Embed Query", type="primary", width="stretch"):
             if query_text:
                 with st.spinner("Generating query embedding..."):
                     start_time = time.time()
@@ -583,7 +573,7 @@ with tab3:
     
     col1, col2 = st.columns([1, 3])
     with col1:
-        if st.button("🚀 Process Batch", type="primary", use_container_width=True):
+        if st.button("🚀 Process Batch", type="primary", width="stretch"):
             valid_docs = [doc for doc in batch_documents if doc["text"].strip()]
             
             if valid_docs:
@@ -626,7 +616,7 @@ with tab3:
                 "Avg Chunk Size": int(sum(len(e['chunk']) for e in doc['embeddings']) / len(doc['embeddings']))
             })
         
-        st.dataframe(summary_data, use_container_width=True)
+        st.dataframe(summary_data, width="stretch")
         
         st.subheader("📑 Detailed Results")
         
@@ -701,9 +691,9 @@ with tab4:
         if server_settings:
             config_df = pd.DataFrame([{k: str(v) for k, v in server_settings.items()}]).T
             config_df.columns = ['Value']
-            st.dataframe(config_df, use_container_width=True)
+            st.dataframe(config_df, width="stretch")
         
-        if st.button("🔄 Reset Session", use_container_width=True):
+        if st.button("🔄 Reset Session", width="stretch"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()

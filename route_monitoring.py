@@ -14,10 +14,6 @@ router = APIRouter()
 class ReloadSettings(BaseModel):
     transformer_model_name: str
     transformer_model_version: str
-    use_query_prompt: bool
-    query_prompt_name: str
-    use_document_prompt: bool
-    document_prompt_name: str | None
     chunk_size: int
     chunk_overlap: int
     min_text_length: int
@@ -60,12 +56,6 @@ async def health_check():
         "model_loaded": app_state.embedding_service is not None,
         "model_info": model_info,
         "gpu_available": gpu_available and not runtime_settings.force_cpu,
-        "prompt_config": {
-            "use_query_prompt": runtime_settings.use_query_prompt,
-            "query_prompt_name": runtime_settings.query_prompt_name,
-            "use_document_prompt": runtime_settings.use_document_prompt,
-            "document_prompt_name": runtime_settings.document_prompt_name,
-        }
     }
 
 
@@ -119,10 +109,6 @@ async def get_current_settings():
     return {
         "transformer_model_name": model_name,
         "transformer_model_version": runtime_settings.transformer_model_version,
-        "use_query_prompt": runtime_settings.use_query_prompt,
-        "query_prompt_name": runtime_settings.query_prompt_name,
-        "use_document_prompt": runtime_settings.use_document_prompt,
-        "document_prompt_name": runtime_settings.document_prompt_name,
         "chunk_size": runtime_settings.chunk_size,
         "chunk_overlap": runtime_settings.chunk_overlap,
         "min_text_length": runtime_settings.min_text_length,

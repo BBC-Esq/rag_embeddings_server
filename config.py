@@ -5,7 +5,8 @@ from pydantic_settings import BaseSettings
 
 class EmbeddingModel(str, Enum):
     MODERNBERT = "freelawproject/modernbert-embed-base_finetune_512"
-    QWEN3 = "Qwen/Qwen3-Embedding-0.6B"
+    QWEN3_small = "Qwen/Qwen3-Embedding-0.6B"
+    QWEN_medium = "Qwen/Qwen3-Embedding-4B"
 
 
 class Settings(BaseSettings):
@@ -16,22 +17,6 @@ class Settings(BaseSettings):
     transformer_model_version: str = Field(
         "main",
         description="Version of the transformer model to use",
-    )
-    use_query_prompt: bool = Field(
-        True,
-        description="Whether to use a prompt for query embeddings",
-    )
-    query_prompt_name: str = Field(
-        "query",
-        description="Name of the prompt to use for query embeddings (if model supports it)",
-    )
-    use_document_prompt: bool = Field(
-        False,
-        description="Whether to use a prompt for document embeddings",
-    )
-    document_prompt_name: str | None = Field(
-        None,
-        description="Name of the prompt to use for document embeddings (if model supports it)",
     )
     chunk_size: int = Field(
         2048, ge=100, le=100000, description="Chunk size in characters"
@@ -61,10 +46,6 @@ class RuntimeSettings:
     def __init__(self):
         self.transformer_model_name = settings.transformer_model_name
         self.transformer_model_version = settings.transformer_model_version
-        self.use_query_prompt = settings.use_query_prompt
-        self.query_prompt_name = settings.query_prompt_name
-        self.use_document_prompt = settings.use_document_prompt
-        self.document_prompt_name = settings.document_prompt_name
         self.chunk_size = settings.chunk_size
         self.chunk_overlap = settings.chunk_overlap
         self.min_text_length = settings.min_text_length

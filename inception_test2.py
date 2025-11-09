@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor, QPalette
 
+from constants import SUPPORTED_EXTENSIONS
 
 API_BASE_URL = "http://localhost:8005"
 
@@ -44,6 +45,237 @@ class ApiWorker(QThread):
         self._is_running = False
 
 
+class FileCollectionWorker(QThread):
+    finished = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, paths, use_subdirs=False, is_directory=False):
+        super().__init__()
+        self.paths = paths
+        self.use_subdirs = use_subdirs
+        self.is_directory = is_directory
+        self._is_running = True
+
+    def run(self):
+        try:
+            all_files = []
+
+            if self.is_directory:
+                directory = Path(self.paths[0])
+
+                if self.use_subdirs:
+                    for ext in SUPPORTED_EXTENSIONS:
+                        pattern = f"**/*{ext}"
+                        for filepath in directory.glob(pattern):
+                            if not self._is_running:
+                                return
+                            if filepath.is_file():
+                                all_files.append(str(filepath))
+                else:
+                    for ext in SUPPORTED_EXTENSIONS:
+                        pattern = f"*{ext}"
+                        for filepath in directory.glob(pattern):
+                            if not self._is_running:
+                                return
+                            if filepath.is_file():
+                                all_files.append(str(filepath))
+            else:
+                for filepath in self.paths:
+                    if not self._is_running:
+                        return
+                    path = Path(filepath)
+                    if path.suffix.lower() in SUPPORTED_EXTENSIONS and path.is_file():
+                        all_files.append(str(filepath))
+
+            if self._is_running:
+                self.finished.emit(all_files)
+
+        except Exception as e:
+            if self._is_running:
+                self.error.emit(str(e))
+
+    def stop(self):
+        self._is_running = False
+
+
+class FileProcessWorker(QThread):
+    progress = Signal(int, int)
+    batch_processed = Signal(list)
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, filepaths, batch_size=500):
+        super().__init__()
+        self.filepaths = filepaths
+        self.batch_size = batch_size
+        self._is_running = True
+
+    def run(self):
+        try:
+            total_files = len(self.filepaths)
+
+            for batch_start in range(0, total_files, self.batch_size):
+                if not self._is_running:
+                    break
+
+                batch_end = min(batch_start + self.batch_size, total_files)
+                batch_paths = self.filepaths[batch_start:batch_end]
+
+                files = []
+                for filepath in batch_paths:
+                    files.append(
+                        ('files', (Path(filepath).name, open(filepath, 'rb'), 'application/octet-stream'))
+                    )
+
+                try:
+                    response = requests.post(
+                        f"{API_BASE_URL}/api/v1/extract_files_batch",
+                        files=files,
+                        timeout=300
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        batch_results = []
+                        for file_data in result['files']:
+                            batch_results.append({
+                                'global_index': batch_start + file_data['id'],
+                                'path': batch_paths[file_data['id']],
+                                'filename': file_data['filename'],
+                                'text': file_data['text'],
+                                'success': file_data['success'],
+                                'error': file_data.get('error'),
+                                'size': file_data['size']
+                            })
+
+                        if self._is_running:
+                            self.batch_processed.emit(batch_results)
+                            self.progress.emit(batch_end, total_files)
+                    else:
+                        raise Exception(f"Server returned status {response.status_code}")
+                finally:
+                    for _, (_, file_obj, _) in files:
+                        file_obj.close()
+
+            if self._is_running:
+                self.finished.emit()
+        except Exception as e:
+            if self._is_running:
+                self.error.emit(str(e))
+
+    def stop(self):
+        self._is_running = False
+
+
+class ChunkWorker(QThread):
+    progress = Signal(int, int)
+    batch_chunked = Signal(list)
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, documents, batch_size=100):
+        super().__init__()
+        self.documents = documents
+        self.batch_size = batch_size
+        self._is_running = True
+
+    def run(self):
+        try:
+            doc_list = list(self.documents.items())
+            total_docs = len(doc_list)
+            
+            for batch_start in range(0, total_docs, self.batch_size):
+                if not self._is_running:
+                    break
+
+                batch_end = min(batch_start + self.batch_size, total_docs)
+                batch_docs = []
+
+                for idx, (doc_id, text) in enumerate(doc_list[batch_start:batch_end]):
+                    batch_docs.append({
+                        "id": doc_id,
+                        "text": text
+                    })
+
+                response = requests.post(
+                    f"{API_BASE_URL}/api/v1/chunk_texts_batch",
+                    json={"documents": batch_docs},
+                    timeout=300
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if self._is_running:
+                        self.batch_chunked.emit(result['results'])
+                        self.progress.emit(batch_end, total_docs)
+                else:
+                    raise Exception(f"Server returned status {response.status_code}")
+
+            if self._is_running:
+                self.finished.emit()
+        except Exception as e:
+            if self._is_running:
+                self.error.emit(str(e))
+
+    def stop(self):
+        self._is_running = False
+
+
+class EmbedWorker(QThread):
+    progress = Signal(int, int)
+    batch_embedded = Signal(list)
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, chunked_documents, batch_size=100):
+        super().__init__()
+        self.chunked_documents = chunked_documents
+        self.batch_size = batch_size
+        self._is_running = True
+
+    def run(self):
+        try:
+            doc_list = list(self.chunked_documents.items())
+            total_docs = len(doc_list)
+
+            for batch_start in range(0, total_docs, self.batch_size):
+                if not self._is_running:
+                    break
+
+                batch_end = min(batch_start + self.batch_size, total_docs)
+                batch_docs = []
+
+                for doc_id, chunks in doc_list[batch_start:batch_end]:
+                    combined_text = "\n\n".join(chunks)
+                    batch_docs.append({
+                        "id": doc_id,
+                        "text": combined_text
+                    })
+
+                response = requests.post(
+                    f"{API_BASE_URL}/api/v1/embed/batch",
+                    json={"documents": batch_docs},
+                    timeout=600
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if self._is_running:
+                        self.batch_embedded.emit(result)
+                        self.progress.emit(batch_end, total_docs)
+                else:
+                    raise Exception(f"Server returned status {response.status_code}")
+
+            if self._is_running:
+                self.finished.emit()
+        except Exception as e:
+            if self._is_running:
+                self.error.emit(str(e))
+
+    def stop(self):
+        self._is_running = False
+
+
 class InceptionGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -60,8 +292,16 @@ class InceptionGUI(QMainWindow):
         self.query_time = None
         self.batch_results = None
         self.batch_time = None
+        self.batch_files = {}
+        self.extracted_texts = {}
+        self.chunked_texts = {}
+        self.all_embeddings = []
 
         self.active_workers = []
+        self.file_collection_worker = None
+        self.file_process_worker = None
+        self.chunk_worker = None
+        self.embed_worker = None
 
         self.setup_ui()
         self.setup_timers()
@@ -70,6 +310,26 @@ class InceptionGUI(QMainWindow):
 
     def closeEvent(self, event):
         self.health_timer.stop()
+
+        if self.file_collection_worker:
+            self.file_collection_worker.stop()
+            self.file_collection_worker.quit()
+            self.file_collection_worker.wait(1000)
+
+        if self.file_process_worker:
+            self.file_process_worker.stop()
+            self.file_process_worker.quit()
+            self.file_process_worker.wait(1000)
+
+        if self.chunk_worker:
+            self.chunk_worker.stop()
+            self.chunk_worker.quit()
+            self.chunk_worker.wait(1000)
+
+        if self.embed_worker:
+            self.embed_worker.stop()
+            self.embed_worker.quit()
+            self.embed_worker.wait(1000)
 
         for worker in self.active_workers:
             worker.stop()
@@ -346,8 +606,8 @@ class InceptionGUI(QMainWindow):
         similarity_layout = QVBoxLayout()
 
         self.similarity_table = QTableWidget()
-        self.similarity_table.setColumnCount(3)
-        self.similarity_table.setHorizontalHeaderLabels(["Rank", "Chunk #", "Similarity"])
+        self.similarity_table.setColumnCount(4)
+        self.similarity_table.setHorizontalHeaderLabels(["Rank", "Document", "Chunk #", "Similarity"])
         self.similarity_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.similarity_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.similarity_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -370,29 +630,115 @@ class InceptionGUI(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        num_layout = QHBoxLayout()
-        num_layout.addWidget(QLabel("Number of Documents:"))
-        self.num_docs_spin = QSpinBox()
-        self.num_docs_spin.setRange(1, 100)
-        self.num_docs_spin.setValue(3)
-        self.num_docs_spin.valueChanged.connect(self.update_batch_docs)
-        num_layout.addWidget(self.num_docs_spin)
-        num_layout.addStretch()
-        layout.addLayout(num_layout)
+        selection_group = QGroupBox("File Selection")
+        selection_layout = QVBoxLayout()
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        self.batch_container = QWidget()
-        self.batch_layout = QVBoxLayout(self.batch_container)
-        scroll.setWidget(self.batch_container)
-        layout.addWidget(scroll)
+        btn_layout = QHBoxLayout()
+        self.select_files_btn = QPushButton("Select Files...")
+        self.select_files_btn.clicked.connect(self.browse_batch_files)
+        self.select_dir_btn = QPushButton("Select Directory...")
+        self.select_dir_btn.clicked.connect(self.browse_batch_directory)
+        btn_layout.addWidget(self.select_files_btn)
+        btn_layout.addWidget(self.select_dir_btn)
+        btn_layout.addStretch()
+        selection_layout.addLayout(btn_layout)
 
-        self.batch_doc_widgets = []
-        self.update_batch_docs()
+        options_layout = QHBoxLayout()
+        self.subdirs_check = QCheckBox("Include subdirectories when selecting directory")
+        self.subdirs_check.setChecked(False)
+        options_layout.addWidget(self.subdirs_check)
+        options_layout.addStretch()
+        selection_layout.addLayout(options_layout)
 
+        selection_group.setLayout(selection_layout)
+        layout.addWidget(selection_group)
+
+        self.collection_progress = QProgressBar()
+        self.collection_progress.setVisible(False)
+        self.collection_progress.setTextVisible(True)
+        self.collection_progress.setFormat("Collecting files: %v")
+        layout.addWidget(self.collection_progress)
+
+        process_group = QGroupBox("Processing")
+        process_layout = QVBoxLayout()
+
+        self.extract_progress = QProgressBar()
+        self.extract_progress.setVisible(False)
+        process_layout.addWidget(QLabel("Text Extraction:"))
+        process_layout.addWidget(self.extract_progress)
+
+        self.chunk_progress = QProgressBar()
+        self.chunk_progress.setVisible(False)
+        process_layout.addWidget(QLabel("Text Chunking:"))
+        process_layout.addWidget(self.chunk_progress)
+
+        self.embed_progress = QProgressBar()
+        self.embed_progress.setVisible(False)
+        process_layout.addWidget(QLabel("Embedding Generation:"))
+        process_layout.addWidget(self.embed_progress)
+
+        btn_row = QHBoxLayout()
+        self.process_files_btn = QPushButton("Process Files")
+        self.process_files_btn.clicked.connect(self.process_files)
+        self.process_files_btn.setEnabled(False)
+        self.chunk_text_btn = QPushButton("Chunk Text")
+        self.chunk_text_btn.clicked.connect(self.chunk_text)
+        self.chunk_text_btn.setEnabled(False)
         self.process_batch_btn = QPushButton("Process Batch")
         self.process_batch_btn.clicked.connect(self.process_batch)
-        layout.addWidget(self.process_batch_btn)
+        self.process_batch_btn.setEnabled(False)
+        btn_row.addWidget(self.process_files_btn)
+        btn_row.addWidget(self.chunk_text_btn)
+        btn_row.addWidget(self.process_batch_btn)
+        btn_row.addStretch()
+        process_layout.addLayout(btn_row)
+
+        process_group.setLayout(process_layout)
+        layout.addWidget(process_group)
+
+        splitter = QSplitter(Qt.Vertical)
+
+        files_group = QGroupBox("Files")
+        files_layout = QVBoxLayout()
+
+        select_btn_layout = QHBoxLayout()
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.clicked.connect(self.select_all_files)
+        self.deselect_all_btn = QPushButton("Deselect All")
+        self.deselect_all_btn.clicked.connect(self.deselect_all_files)
+        select_btn_layout.addWidget(self.select_all_btn)
+        select_btn_layout.addWidget(self.deselect_all_btn)
+        select_btn_layout.addStretch()
+        files_layout.addLayout(select_btn_layout)
+
+        self.batch_files_table = QTableWidget()
+        self.batch_files_table.setColumnCount(4)
+        self.batch_files_table.setHorizontalHeaderLabels(["Include", "Status", "File Name", "Size"])
+        self.batch_files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.batch_files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.batch_files_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.batch_files_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.batch_files_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.batch_files_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.batch_files_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.batch_files_table.itemSelectionChanged.connect(self.display_selected_file_text)
+        files_layout.addWidget(self.batch_files_table)
+        files_group.setLayout(files_layout)
+        splitter.addWidget(files_group)
+
+        text_group = QGroupBox("File Content")
+        text_layout = QVBoxLayout()
+        self.batch_file_display = QTextEdit()
+        self.batch_file_display.setReadOnly(True)
+        self.batch_file_display.setPlaceholderText("Select a file to view its content...")
+        text_layout.addWidget(self.batch_file_display)
+        text_group.setLayout(text_layout)
+        splitter.addWidget(text_group)
+
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(splitter)
 
         self.batch_results_group = QGroupBox("Batch Results")
         batch_results_layout = QVBoxLayout()
@@ -408,7 +754,7 @@ class InceptionGUI(QMainWindow):
 
         self.batch_summary_table = QTableWidget()
         self.batch_summary_table.setColumnCount(4)
-        self.batch_summary_table.setHorizontalHeaderLabels(["Doc ID", "Chunks", "Total Chars", "Avg Chunk Size"])
+        self.batch_summary_table.setHorizontalHeaderLabels(["File Name", "Chunks", "Total Chars", "Avg Chunk Size"])
         self.batch_summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         batch_results_layout.addWidget(self.batch_summary_table)
 
@@ -587,15 +933,325 @@ class InceptionGUI(QMainWindow):
             self,
             "Open Document",
             "",
-            "Text Files (*.txt *.md);;All Files (*)"
+            "Text Files (*.txt *.md *.html);;All Files (*)"
         )
         if filename:
             try:
-                with open(filename, 'r', encoding='utf-8') as f:
+                with open(filename, 'rb') as f:
                     content = f.read()
-                    self.doc_text_edit.setText(content)
+                
+                files = [('files', (Path(filename).name, content, 'application/octet-stream'))]
+                response = requests.post(
+                    f"{API_BASE_URL}/api/v1/extract_files_batch",
+                    files=files,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result['files'][0]['success']:
+                        self.doc_text_edit.setText(result['files'][0]['text'])
+                    else:
+                        QMessageBox.critical(self, "Error", f"Failed to extract text: {result['files'][0]['error']}")
+                else:
+                    QMessageBox.critical(self, "Error", f"Server error: {response.status_code}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to read file: {str(e)}")
+
+    def browse_batch_files(self):
+        filenames, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Files",
+            "",
+            "Text Files (*.txt *.md *.html);;All Files (*)"
+        )
+        if filenames:
+            self.start_file_collection(filenames, is_directory=False)
+
+    def browse_batch_directory(self):
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Directory"
+        )
+        if directory:
+            self.start_file_collection([directory], is_directory=True)
+
+    def start_file_collection(self, paths, is_directory=False):
+        if self.file_collection_worker and self.file_collection_worker.isRunning():
+            self.file_collection_worker.stop()
+            self.file_collection_worker.wait()
+
+        self.batch_files = {}
+        self.extracted_texts = {}
+        self.chunked_texts = {}
+        self.all_embeddings = []
+        self.batch_files_table.setRowCount(0)
+        self.batch_file_display.clear()
+
+        self.collection_progress.setVisible(True)
+        self.collection_progress.setMaximum(0)
+        self.collection_progress.setFormat("Collecting files...")
+
+        self.select_files_btn.setEnabled(False)
+        self.select_dir_btn.setEnabled(False)
+        self.process_files_btn.setEnabled(False)
+
+        use_subdirs = self.subdirs_check.isChecked() if is_directory else False
+
+        self.file_collection_worker = FileCollectionWorker(paths, use_subdirs, is_directory)
+        self.file_collection_worker.finished.connect(self.on_collection_complete)
+        self.file_collection_worker.error.connect(self.on_collection_error)
+        self.file_collection_worker.start()
+
+    def on_collection_complete(self, all_files):
+        self.collection_progress.setFormat("Updating table...")
+        self.statusBar().showMessage(f"Updating table with {len(all_files)} files...")
+
+        self.batch_files_table.setUpdatesEnabled(False)
+        self.batch_files_table.setRowCount(len(all_files))
+
+        for idx, filepath in enumerate(all_files):
+            path = Path(filepath)
+
+            file_info = {
+                'path': filepath,
+                'text': '',
+                'success': False,
+                'error': None,
+                'size': 0
+            }
+            self.batch_files[idx] = file_info
+
+            checkbox_widget = QWidget()
+            checkbox_layout = QHBoxLayout(checkbox_widget)
+            checkbox = QCheckBox()
+            checkbox.setChecked(True)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(Qt.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            self.batch_files_table.setCellWidget(idx, 0, checkbox_widget)
+
+            status_item = QTableWidgetItem("⋯")
+            status_item.setForeground(QColor("gray"))
+            self.batch_files_table.setItem(idx, 1, status_item)
+
+            self.batch_files_table.setItem(idx, 2, QTableWidgetItem(path.name))
+            self.batch_files_table.setItem(idx, 3, QTableWidgetItem("-"))
+
+        self.batch_files_table.setUpdatesEnabled(True)
+
+        self.collection_progress.setVisible(False)
+        self.select_files_btn.setEnabled(True)
+        self.select_dir_btn.setEnabled(True)
+        self.process_files_btn.setEnabled(len(self.batch_files) > 0)
+        self.statusBar().showMessage(f"Collected {len(self.batch_files)} files", 3000)
+
+    def on_collection_error(self, error):
+        self.collection_progress.setVisible(False)
+        self.select_files_btn.setEnabled(True)
+        self.select_dir_btn.setEnabled(True)
+        QMessageBox.critical(self, "Error", f"Error collecting files: {error}")
+
+    def process_files(self):
+        selected_files = []
+        
+        for row in range(self.batch_files_table.rowCount()):
+            checkbox_widget = self.batch_files_table.cellWidget(row, 0)
+            if checkbox_widget:
+                checkbox = checkbox_widget.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    file_info = self.batch_files[row]
+                    selected_files.append(file_info['path'])
+
+        if not selected_files:
+            QMessageBox.warning(self, "Warning", "No files selected")
+            return
+
+        self.process_files_btn.setEnabled(False)
+        self.process_files_btn.setText("Processing...")
+        self.extract_progress.setVisible(True)
+        self.extract_progress.setMaximum(len(selected_files))
+        self.extract_progress.setValue(0)
+
+        self.file_process_worker = FileProcessWorker(selected_files, batch_size=500)
+        self.file_process_worker.progress.connect(self.on_extract_progress)
+        self.file_process_worker.batch_processed.connect(self.on_batch_extracted)
+        self.file_process_worker.finished.connect(self.on_extract_complete)
+        self.file_process_worker.error.connect(self.on_extract_error)
+        self.file_process_worker.start()
+
+    def on_extract_progress(self, current, total):
+        self.extract_progress.setValue(current)
+        self.statusBar().showMessage(f"Extracting text: {current}/{total}")
+
+    def on_batch_extracted(self, batch):
+        for file_info in batch:
+            idx = file_info['global_index']
+            self.batch_files[idx]['text'] = file_info['text']
+            self.batch_files[idx]['success'] = file_info['success']
+            self.batch_files[idx]['error'] = file_info['error']
+            self.batch_files[idx]['size'] = file_info['size']
+
+            if file_info['success']:
+                self.extracted_texts[idx] = file_info['text']
+
+            status_item = QTableWidgetItem("✓" if file_info['success'] else "✗")
+            status_item.setForeground(QColor("green") if file_info['success'] else QColor("red"))
+            self.batch_files_table.setItem(idx, 1, status_item)
+            self.batch_files_table.setItem(idx, 3, QTableWidgetItem(str(file_info['size'])))
+
+        QApplication.processEvents()
+
+    def on_extract_complete(self):
+        self.extract_progress.setVisible(False)
+        self.process_files_btn.setEnabled(True)
+        self.process_files_btn.setText("Process Files")
+        self.chunk_text_btn.setEnabled(len(self.extracted_texts) > 0)
+        self.statusBar().showMessage(f"Extracted {len(self.extracted_texts)} files", 3000)
+
+    def on_extract_error(self, error):
+        self.extract_progress.setVisible(False)
+        self.process_files_btn.setEnabled(True)
+        self.process_files_btn.setText("Process Files")
+        QMessageBox.critical(self, "Error", f"Extraction failed: {error}")
+
+    def chunk_text(self):
+        if not self.extracted_texts:
+            QMessageBox.warning(self, "Warning", "No extracted text to chunk")
+            return
+
+        self.chunk_text_btn.setEnabled(False)
+        self.chunk_text_btn.setText("Chunking...")
+        self.chunk_progress.setVisible(True)
+        self.chunk_progress.setMaximum(len(self.extracted_texts))
+        self.chunk_progress.setValue(0)
+
+        self.chunk_worker = ChunkWorker(self.extracted_texts, batch_size=100)
+        self.chunk_worker.progress.connect(self.on_chunk_progress)
+        self.chunk_worker.batch_chunked.connect(self.on_batch_chunked)
+        self.chunk_worker.finished.connect(self.on_chunk_complete)
+        self.chunk_worker.error.connect(self.on_chunk_error)
+        self.chunk_worker.start()
+
+    def on_chunk_progress(self, current, total):
+        self.chunk_progress.setValue(current)
+        self.statusBar().showMessage(f"Chunking text: {current}/{total}")
+
+    def on_batch_chunked(self, batch):
+        for result in batch:
+            if result['success']:
+                self.chunked_texts[result['id']] = result['chunks']
+        QApplication.processEvents()
+
+    def on_chunk_complete(self):
+        self.chunk_progress.setVisible(False)
+        self.chunk_text_btn.setEnabled(True)
+        self.chunk_text_btn.setText("Chunk Text")
+        self.process_batch_btn.setEnabled(len(self.chunked_texts) > 0)
+        self.statusBar().showMessage(f"Chunked {len(self.chunked_texts)} documents", 3000)
+
+    def on_chunk_error(self, error):
+        self.chunk_progress.setVisible(False)
+        self.chunk_text_btn.setEnabled(True)
+        self.chunk_text_btn.setText("Chunk Text")
+        QMessageBox.critical(self, "Error", f"Chunking failed: {error}")
+
+    def process_batch(self):
+        if not self.chunked_texts:
+            QMessageBox.warning(self, "Warning", "No chunked text to process")
+            return
+
+        self.process_batch_btn.setEnabled(False)
+        self.process_batch_btn.setText("Generating Embeddings...")
+        self.embed_progress.setVisible(True)
+        self.embed_progress.setMaximum(len(self.chunked_texts))
+        self.embed_progress.setValue(0)
+
+        start_time = time.time()
+        self.batch_start_time = start_time
+
+        self.embed_worker = EmbedWorker(self.chunked_texts, batch_size=100)
+        self.embed_worker.progress.connect(self.on_embed_progress)
+        self.embed_worker.batch_embedded.connect(self.on_batch_embedded)
+        self.embed_worker.finished.connect(self.on_embed_complete)
+        self.embed_worker.error.connect(self.on_embed_error)
+        self.embed_worker.start()
+
+    def on_embed_progress(self, current, total):
+        self.embed_progress.setValue(current)
+        self.statusBar().showMessage(f"Generating embeddings: {current}/{total}")
+
+    def on_batch_embedded(self, batch):
+        self.all_embeddings.extend(batch)
+        QApplication.processEvents()
+
+    def on_embed_complete(self):
+        elapsed = time.time() - self.batch_start_time
+        
+        self.embed_progress.setVisible(False)
+        self.process_batch_btn.setEnabled(True)
+        self.process_batch_btn.setText("Process Batch")
+
+        self.batch_results = self.all_embeddings
+        self.batch_time = elapsed
+
+        total_chunks = sum(len(doc['embeddings']) for doc in self.all_embeddings)
+
+        self.batch_docs_label.setText(f"Documents: {len(self.all_embeddings)}")
+        self.batch_chunks_label.setText(f"Chunks: {total_chunks}")
+        self.batch_time_label.setText(f"Time: {elapsed:.2f}s")
+
+        self.batch_summary_table.setRowCount(len(self.all_embeddings))
+        for i, doc in enumerate(self.all_embeddings):
+            doc_id = doc['id']
+            filename = Path(self.batch_files[doc_id]['path']).name
+            self.batch_summary_table.setItem(i, 0, QTableWidgetItem(filename))
+            self.batch_summary_table.setItem(i, 1, QTableWidgetItem(str(len(doc['embeddings']))))
+            total_chars = sum(len(e['chunk']) for e in doc['embeddings'])
+            self.batch_summary_table.setItem(i, 2, QTableWidgetItem(str(total_chars)))
+            avg_size = int(total_chars / len(doc['embeddings'])) if doc['embeddings'] else 0
+            self.batch_summary_table.setItem(i, 3, QTableWidgetItem(str(avg_size)))
+
+        self.batch_results_group.setVisible(True)
+        self.statusBar().showMessage(f"Generated embeddings for {len(self.all_embeddings)} documents in {elapsed:.2f}s", 5000)
+
+    def on_embed_error(self, error):
+        self.embed_progress.setVisible(False)
+        self.process_batch_btn.setEnabled(True)
+        self.process_batch_btn.setText("Process Batch")
+        QMessageBox.critical(self, "Error", f"Embedding generation failed: {error}")
+
+    def select_all_files(self):
+        for row in range(self.batch_files_table.rowCount()):
+            checkbox_widget = self.batch_files_table.cellWidget(row, 0)
+            if checkbox_widget:
+                checkbox = checkbox_widget.findChild(QCheckBox)
+                if checkbox and checkbox.isEnabled():
+                    checkbox.setChecked(True)
+
+    def deselect_all_files(self):
+        for row in range(self.batch_files_table.rowCount()):
+            checkbox_widget = self.batch_files_table.cellWidget(row, 0)
+            if checkbox_widget:
+                checkbox = checkbox_widget.findChild(QCheckBox)
+                if checkbox and checkbox.isEnabled():
+                    checkbox.setChecked(False)
+
+    def display_selected_file_text(self):
+        selected_rows = self.batch_files_table.selectedIndexes()
+        if not selected_rows:
+            self.batch_file_display.clear()
+            return
+
+        row = selected_rows[0].row()
+        if row < len(self.batch_files):
+            file_info = self.batch_files[row]
+            if file_info['success'] and file_info['text']:
+                self.batch_file_display.setPlainText(file_info['text'])
+            elif file_info['error']:
+                self.batch_file_display.setPlainText(f"Error: {file_info['error']}")
+            else:
+                self.batch_file_display.setPlainText("No text extracted yet")
 
     def generate_document_embeddings(self):
         text = self.doc_text_edit.toPlainText()
@@ -702,8 +1358,10 @@ class InceptionGUI(QMainWindow):
         self.query_text = self.query_text_edit.toPlainText()
         self.query_time = result.get('elapsed', 0)
 
-        if self.doc_embeddings:
-            self.compute_similarities()
+        if self.batch_results:
+            self.compute_similarities_batch()
+        elif self.doc_embeddings:
+            self.compute_similarities_single()
 
         self.embed_query_btn.setEnabled(True)
         self.embed_query_btn.setText("Embed Query")
@@ -714,7 +1372,7 @@ class InceptionGUI(QMainWindow):
         self.embed_query_btn.setEnabled(True)
         self.embed_query_btn.setText("Embed Query")
 
-    def compute_similarities(self):
+    def compute_similarities_single(self):
         doc_embeddings = self.doc_embeddings['embeddings']
 
         qemb = np.array(self.query_embedding)
@@ -724,6 +1382,7 @@ class InceptionGUI(QMainWindow):
         for idx, doc_vec in enumerate(doc_vecs):
             sim = np.dot(qemb, doc_vec) / (np.linalg.norm(qemb) * np.linalg.norm(doc_vec))
             similarities.append({
+                'document': 'Single Document',
                 'chunk_number': doc_embeddings[idx]['chunk_number'],
                 'similarity': float(sim),
                 'chunk': doc_embeddings[idx]['chunk']
@@ -737,8 +1396,42 @@ class InceptionGUI(QMainWindow):
         self.similarity_table.setRowCount(num_results)
         for i, result in enumerate(self.similarity_results):
             self.similarity_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.similarity_table.setItem(i, 1, QTableWidgetItem(str(result['chunk_number'])))
-            self.similarity_table.setItem(i, 2, QTableWidgetItem(f"{result['similarity']*100:.2f}%"))
+            self.similarity_table.setItem(i, 1, QTableWidgetItem(result['document']))
+            self.similarity_table.setItem(i, 2, QTableWidgetItem(str(result['chunk_number'])))
+            self.similarity_table.setItem(i, 3, QTableWidgetItem(f"{result['similarity']*100:.2f}%"))
+
+        self.chunk_display.clear()
+        self.similarity_group.setVisible(True)
+
+    def compute_similarities_batch(self):
+        qemb = np.array(self.query_embedding)
+        similarities = []
+
+        for doc_result in self.batch_results:
+            doc_id = doc_result['id']
+            doc_name = Path(self.batch_files[doc_id]['path']).name
+            
+            for chunk_data in doc_result['embeddings']:
+                chunk_vec = np.array(chunk_data['embedding'])
+                sim = np.dot(qemb, chunk_vec) / (np.linalg.norm(qemb) * np.linalg.norm(chunk_vec))
+                similarities.append({
+                    'document': doc_name,
+                    'chunk_number': chunk_data['chunk_number'],
+                    'similarity': float(sim),
+                    'chunk': chunk_data['chunk']
+                })
+
+        similarities.sort(key=lambda x: x['similarity'], reverse=True)
+
+        num_results = min(10, len(similarities))
+        self.similarity_results = similarities[:num_results]
+
+        self.similarity_table.setRowCount(num_results)
+        for i, result in enumerate(self.similarity_results):
+            self.similarity_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            self.similarity_table.setItem(i, 1, QTableWidgetItem(result['document']))
+            self.similarity_table.setItem(i, 2, QTableWidgetItem(str(result['chunk_number'])))
+            self.similarity_table.setItem(i, 3, QTableWidgetItem(f"{result['similarity']*100:.2f}%"))
 
         self.chunk_display.clear()
         self.similarity_group.setVisible(True)
@@ -753,109 +1446,6 @@ class InceptionGUI(QMainWindow):
         if hasattr(self, 'similarity_results') and row < len(self.similarity_results):
             chunk_text = self.similarity_results[row]['chunk']
             self.chunk_display.setPlainText(chunk_text)
-
-    def update_batch_docs(self):
-        while self.batch_layout.count():
-            child = self.batch_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-        self.batch_doc_widgets = []
-        num_docs = self.num_docs_spin.value()
-
-        for i in range(num_docs):
-            group = QGroupBox(f"Document {i+1}")
-            layout = QVBoxLayout()
-
-            id_layout = QHBoxLayout()
-            id_layout.addWidget(QLabel("Document ID:"))
-            id_spin = QSpinBox()
-            id_spin.setRange(0, 10000)
-            id_spin.setValue(i + 1)
-            id_layout.addWidget(id_spin)
-            id_layout.addStretch()
-            layout.addLayout(id_layout)
-
-            text_edit = QTextEdit()
-            text_edit.setPlaceholderText(f"Enter text for document {i+1}...")
-            text_edit.setMaximumHeight(100)
-            layout.addWidget(text_edit)
-
-            group.setLayout(layout)
-            self.batch_layout.addWidget(group)
-            
-            self.batch_doc_widgets.append({
-                'group': group,
-                'id_spin': id_spin,
-                'text_edit': text_edit
-            })
-
-    def process_batch(self):
-        documents = []
-        for widget in self.batch_doc_widgets:
-            doc_id = widget['id_spin'].value()
-            text = widget['text_edit'].toPlainText()
-            if text.strip():
-                documents.append({"id": doc_id, "text": text})
-
-        if not documents:
-            QMessageBox.warning(self, "Warning", "Please enter text for at least one document")
-            return
-
-        self.process_batch_btn.setEnabled(False)
-        self.process_batch_btn.setText("Processing...")
-
-        worker = ApiWorker(self._embed_batch, documents)
-        worker.finished.connect(self.batch_complete)
-        worker.error.connect(self.batch_failed)
-        self.add_worker(worker)
-        worker.start()
-
-    def _embed_batch(self, documents):
-        start_time = time.time()
-        response = requests.post(
-            f"{API_BASE_URL}/api/v1/embed/batch",
-            json={"documents": documents},
-            timeout=300
-        )
-        elapsed = time.time() - start_time
-        if response.status_code == 200:
-            result = response.json()
-            return {'results': result, 'elapsed': elapsed}
-        else:
-            raise Exception(f"Server returned status {response.status_code}")
-
-    def batch_complete(self, data):
-        results = data['results']
-        elapsed = data['elapsed']
-
-        self.batch_results = results
-        self.batch_time = elapsed
-
-        total_chunks = sum(len(doc['embeddings']) for doc in results)
-
-        self.batch_docs_label.setText(f"Documents: {len(results)}")
-        self.batch_chunks_label.setText(f"Chunks: {total_chunks}")
-        self.batch_time_label.setText(f"Time: {elapsed:.2f}s")
-
-        self.batch_summary_table.setRowCount(len(results))
-        for i, doc in enumerate(results):
-            self.batch_summary_table.setItem(i, 0, QTableWidgetItem(str(doc['id'])))
-            self.batch_summary_table.setItem(i, 1, QTableWidgetItem(str(len(doc['embeddings']))))
-            total_chars = sum(len(e['chunk']) for e in doc['embeddings'])
-            self.batch_summary_table.setItem(i, 2, QTableWidgetItem(str(total_chars)))
-            avg_size = int(total_chars / len(doc['embeddings']))
-            self.batch_summary_table.setItem(i, 3, QTableWidgetItem(str(avg_size)))
-
-        self.batch_results_group.setVisible(True)
-        self.process_batch_btn.setEnabled(True)
-        self.process_batch_btn.setText("Process Batch")
-        self.statusBar().showMessage(f"Processed {len(results)} documents in {elapsed:.2f}s", 5000)
-
-    def batch_failed(self, error):
-        QMessageBox.critical(self, "Error", f"Batch processing failed: {error}")
-        self.process_batch_btn.setEnabled(True)
-        self.process_batch_btn.setText("Process Batch")
 
 
 def main():

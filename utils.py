@@ -35,6 +35,33 @@ def clean_triton_cache():
         return True
 
 
+def extract_text_from_file(content: bytes, filename: str) -> str:
+    try:
+        text = content.decode('utf-8')
+        
+        if filename.lower().endswith('.html'):
+            import html2text
+            h = html2text.HTML2Text()
+            h.unicode_snob = True
+            h.body_width = 0
+            h.skip_internal_links = True
+            h.ignore_anchors = True
+            h.ignore_images = True
+            h.ignore_emphasis = True
+            h.ignore_links = True
+            h.single_line_break = True
+            h.mark_code = False
+            h.decode_errors = 'ignore'
+            h.bypass_tables = False
+            text = h.handle(text)
+        
+        return text
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Failed to decode file {filename}: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Failed to extract text from {filename}: {str(e)}")
+
+
 def validate_text_length(
     text: str, endpoint: str, doc_id: int | None = None
 ) -> None:

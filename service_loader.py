@@ -36,7 +36,7 @@ async def load_embedding_service(custom_settings=None):
                     "torch_dtype": torch.float32
                 },
                 tokenizer_kwargs={
-                    # "padding_side": "left",
+                    "padding_side": "left",
                     "model_max_length": 8192
                 }
             )

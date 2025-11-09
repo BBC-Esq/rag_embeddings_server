@@ -98,3 +98,11 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     embedding: list[float]
+
+
+class FileUploadResponse(BaseModel):
+    filename: str
+    text: str
+    success: bool
+    size: int
+    error: str | None

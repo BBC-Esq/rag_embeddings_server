@@ -64,6 +64,7 @@ libs = [
     "gitdb==4.0.12",
     "google==3.0.0",
     "h11==0.16.0",
+    "html2text==2025.4.15",
     "huggingface-hub==0.36.0", # tokenizers requires <1.0
     "idna==3.11",
     "Jinja2==3.1.6",
@@ -88,6 +89,7 @@ libs = [
     "pydeck==0.9.1",
     "python-dateutil==2.9.0.post0",
     "python-dotenv==1.2.1",
+    "python-multipart==0.0.20",
     "pytz==2025.2",
     "PyYAML==6.0.3",
     "referencing==0.37.0",
@@ -123,3 +125,5 @@ libs = [
 full_install_libs = [
     "pyside6",
 ]
+
+SUPPORTED_EXTENSIONS = ['.txt', '.md', '.html']

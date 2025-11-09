@@ -1,4 +1,47 @@
-import asyncio
+import os
+import sys
+import platform
+from pathlib import Path
+
+def set_cuda_paths():
+    if platform.system() != "Windows":
+        return
+    
+    venv_base = Path(sys.executable).parent.parent
+    nvidia_base = venv_base / 'Lib' / 'site-packages' / 'nvidia'
+    
+    if not nvidia_base.exists():
+        return
+    
+    cuda_path_runtime = nvidia_base / 'cuda_runtime' / 'bin'
+    cuda_path_runtime_lib = nvidia_base / 'cuda_runtime' / 'lib' / 'x64'
+    cuda_path_runtime_include = nvidia_base / 'cuda_runtime' / 'include'
+    cublas_path = nvidia_base / 'cublas' / 'bin'
+    cudnn_path = nvidia_base / 'cudnn' / 'bin'
+    nvrtc_path = nvidia_base / 'cuda_nvrtc' / 'bin'
+    nvcc_path = nvidia_base / 'cuda_nvcc' / 'bin'
+    
+    paths_to_add = [
+        str(cuda_path_runtime),
+        str(cuda_path_runtime_lib),
+        str(cuda_path_runtime_include),
+        str(cublas_path),
+        str(cudnn_path),
+        str(nvrtc_path),
+        str(nvcc_path),
+    ]
+    
+    current_value = os.environ.get('PATH', '')
+    new_value = os.pathsep.join(paths_to_add + ([current_value] if current_value else []))
+    os.environ['PATH'] = new_value
+    
+    triton_cuda_path = nvidia_base / 'cuda_runtime'
+    current_cuda_path = os.environ.get('CUDA_PATH', '')
+    new_cuda_path = os.pathsep.join([str(triton_cuda_path)] + ([current_cuda_path] if current_cuda_path else []))
+    os.environ['CUDA_PATH'] = new_cuda_path
+
+set_cuda_paths()
+
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,82 +50,32 @@ import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from sentence_transformers import SentenceTransformer
 from sentry_sdk.integrations.fastapi import FastApiIntegration
-from transformers import AutoTokenizer
 
-import app_state  # ← Add this import
-from config import settings
-from embedding_service import EmbeddingService
+import app_state
+from service_loader import load_embedding_service
 from utils import handle_nltk_download, logger
 
-# Ensure NLTK resources are available
 handle_nltk_download()
 
-# Initialize Sentry
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
     integrations=[FastApiIntegration()],
     traces_sample_rate=1.0,
 )
 
-# Remove this line:
-# embedding_service = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Handle application startup and shutdown.
-
-    :param app: The FastAPI application instance.
-    :return: None
-    """
-    # Change from 'global embedding_service' to:
-    max_retries = 3
-    retry_delay = 5  # seconds
-
-    # Startup
-    for attempt in range(max_retries):
-        try:
-            logger.info(
-                f"Attempting to initialize embedding service (attempt {attempt + 1}/{max_retries})"
-            )
-            model = SentenceTransformer(
-                settings.transformer_model_name,
-                revision=settings.transformer_model_version,
-            )
-            tokenizer = AutoTokenizer.from_pretrained(
-                settings.transformer_model_name
-            )
-            app_state.embedding_service = EmbeddingService(  # ← Change this
-                model=model,
-                tokenizer=tokenizer,
-                max_tokens=settings.max_tokens,
-                overlap_ratio=settings.overlap_ratio,
-                processing_batch_size=settings.processing_batch_size,
-                max_workers=settings.max_workers,
-            )
-            logger.info("Embedding service initialized successfully")
-            break
-        except Exception as e:
-            logger.warning(
-                f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}"
-            )
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                await asyncio.sleep(retry_delay)
-            else:
-                sentry_sdk.capture_exception(e)
-                raise RuntimeError("Failed to initialize embedding service")
-
+    """Handle application startup and shutdown."""
+    await load_embedding_service()
+    
     try:
-        # Allows the application to run between startup and shutdown.
         yield
     finally:
-        # Shutdown
         try:
-            if app_state.embedding_service:  # ← Change this
-                app_state.embedding_service = None  # ← Change this
+            if app_state.embedding_service:
+                app_state.embedding_service = None
         except Exception as e:
             sentry_sdk.capture_exception(e)
             logger.error(f"Error during shutdown: {str(e)}")
@@ -95,7 +88,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
@@ -130,9 +122,8 @@ def custom_openapi():
     return app.openapi_schema
 
 
-app.openapi = custom_openapi  # type: ignore
+app.openapi = custom_openapi
 
-# Import routes here, AFTER app is defined
 from route_embedding import router as embedding_router
 from route_monitoring import router as monitoring_router
 

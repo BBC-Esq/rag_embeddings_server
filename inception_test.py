@@ -1,3 +1,4 @@
+# inception_test.py
 import streamlit as st
 import requests
 import json
@@ -5,6 +6,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Optional
 import time
+from sentence_transformers import util
 
 st.set_page_config(
     page_title="Inception Embedding Test Suite",
@@ -15,11 +17,6 @@ st.set_page_config(
 
 API_BASE_URL = "http://localhost:8005"
 
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    vec1_np = np.array(vec1)
-    vec2_np = np.array(vec2)
-    return np.dot(vec1_np, vec2_np) / (np.linalg.norm(vec1_np) * np.linalg.norm(vec2_np))
-
 def check_service_health():
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=2)
@@ -27,8 +24,24 @@ def check_service_health():
     except:
         return None
 
-def update_service_config(config: Dict):
-    st.session_state.current_config = config
+def get_current_settings():
+    try:
+        response = requests.get(f"{API_BASE_URL}/current_settings", timeout=2)
+        return response.json() if response.status_code == 200 else None
+    except:
+        return None
+
+def reload_service(settings: Dict):
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/reload_service",
+            json=settings,
+            timeout=120
+        )
+        return response.json() if response.status_code == 200 else None
+    except Exception as e:
+        st.error(f"Service reload failed: {str(e)}")
+        return None
 
 def embed_query(text: str) -> Optional[Dict]:
     try:
@@ -73,13 +86,56 @@ with st.sidebar:
     st.header("⚙️ Configuration")
     
     health = check_service_health()
+    current_model = None
+    server_settings = get_current_settings()
+    
     if health:
         status_color = "green" if health.get("status") == "healthy" else "orange"
         st.markdown(f"**Status:** :{status_color}[{health.get('status', 'unknown').upper()}]")
         st.markdown(f"**Model Loaded:** {health.get('model_loaded', False)}")
+        
+        if health.get('model_info'):
+            model_info = health['model_info']
+            current_model = model_info.get('name', 'Unknown')
+            st.markdown(f"**Current Model:** `{current_model}`")
+            if model_info.get('supports_prompts'):
+                available_prompts = model_info.get('available_prompts', [])
+                st.markdown(f"**Available Prompts:** {', '.join(available_prompts)}")
+        
         st.markdown(f"**GPU Available:** {health.get('gpu_available', False)}")
+        
+        if health.get('prompt_config'):
+            prompt_config = health['prompt_config']
+            st.markdown("**Prompt Config:**")
+            if prompt_config.get('use_query_prompt'):
+                st.markdown(f"  - Query: `{prompt_config.get('query_prompt_name')}`")
+            if prompt_config.get('use_document_prompt'):
+                st.markdown(f"  - Document: `{prompt_config.get('document_prompt_name')}`")
     else:
         st.markdown("**Status:** :red[OFFLINE]")
+    
+    st.divider()
+    
+    st.subheader("🤖 Model Selection")
+    
+    available_models = [
+        "freelawproject/modernbert-embed-base_finetune_512",
+        "Qwen/Qwen3-Embedding-0.6B"
+    ]
+    
+    current_index = 0
+    if current_model:
+        try:
+            current_index = available_models.index(current_model)
+        except ValueError:
+            current_index = 0
+    
+    selected_model = st.selectbox(
+        "Embedding Model",
+        available_models,
+        index=current_index,
+        key="model_selector"
+    )
     
     st.divider()
     
@@ -89,19 +145,19 @@ with st.sidebar:
         "Max Tokens per Chunk",
         min_value=256,
         max_value=10000,
-        value=512,
+        value=server_settings.get('max_tokens', 512) if server_settings else 512,
         step=64,
-        help="Maximum number of tokens allowed in each text chunk. The model will split longer documents into chunks of this size. Smaller values create more chunks but ensure each chunk fits within the model's context window. Typical values: 256-1024 for most embedding models."
+        key="max_tokens"
     )
     
     overlap_ratio = st.slider(
         "Overlap Ratio",
         min_value=0.0,
         max_value=0.01,
-        value=0.004,
+        value=server_settings.get('overlap_ratio', 0.004) if server_settings else 0.004,
         step=0.001,
         format="%.3f",
-        help="Determines how many sentences overlap between consecutive chunks to maintain context continuity. Higher values (e.g., 0.01) provide more overlap and better context preservation but increase processing time. Lower values (e.g., 0.001) reduce redundancy. The actual number of overlapping sentences = max_tokens × overlap_ratio."
+        key="overlap_ratio"
     )
     
     st.subheader("Text Constraints")
@@ -110,27 +166,27 @@ with st.sidebar:
         "Min Text Length",
         min_value=1,
         max_value=1000,
-        value=1,
+        value=server_settings.get('min_text_length', 1) if server_settings else 1,
         step=1,
-        help="Minimum character length required for input text. Requests with text shorter than this will be rejected. Set to 1 to allow even single characters, or higher to enforce meaningful input requirements."
+        key="min_text_length"
     )
     
     max_query_length = st.number_input(
         "Max Query Length",
         min_value=100,
         max_value=10000,
-        value=1000,
+        value=server_settings.get('max_query_length', 1000) if server_settings else 1000,
         step=100,
-        help="Maximum character length for search queries. Queries are typically short (1-2 sentences), so this limit prevents excessively long inputs. Longer queries may lose focus and reduce search accuracy. Recommended: 500-1000 characters."
+        key="max_query_length"
     )
     
     max_text_length = st.number_input(
         "Max Text Length",
         min_value=1000,
         max_value=100000000,
-        value=10000000,
+        value=server_settings.get('max_text_length', 10000000) if server_settings else 10000000,
         step=100000,
-        help="Maximum character length for document text. This prevents memory issues from extremely large documents. Documents exceeding this limit will be rejected. Set based on your system's memory capacity. For production: 1-10 million characters typically handles legal documents and research papers."
+        key="max_text_length"
     )
     
     st.subheader("Processing Settings")
@@ -139,46 +195,52 @@ with st.sidebar:
         "Max Batch Size",
         min_value=1,
         max_value=1000,
-        value=100,
+        value=server_settings.get('max_batch_size', 100) if server_settings else 100,
         step=10,
-        help="Maximum number of documents that can be processed in a single batch request. Larger batches improve throughput but require more memory. If you encounter out-of-memory errors, reduce this value. Recommended: 10-100 for most systems."
+        key="max_batch_size"
     )
     
     processing_batch_size = st.number_input(
         "Processing Batch Size",
         min_value=1,
         max_value=64,
-        value=8,
+        value=server_settings.get('processing_batch_size', 8) if server_settings else 8,
         step=1,
-        help="Number of chunks processed simultaneously by the embedding model. Higher values speed up processing but use more GPU/CPU memory. Optimal value depends on your hardware: GPU with 8GB VRAM can handle 16-32, CPU systems should use 4-8. Too high will cause out-of-memory errors."
+        key="processing_batch_size"
     )
     
     max_workers = st.number_input(
         "Max Workers",
         min_value=1,
         max_value=32,
-        value=4,
+        value=server_settings.get('max_workers', 4) if server_settings else 4,
         step=1,
-        help="Number of parallel worker threads for text chunking operations. More workers speed up pre-processing for large documents but increase CPU usage. Set to number of CPU cores (or cores-1) for optimal performance. Does not affect GPU embedding generation."
+        key="max_workers"
     )
     
     st.subheader("System Settings")
     
     force_cpu = st.checkbox(
         "Force CPU",
-        value=False,
-        help="Force the model to run on CPU even if a GPU is available. Useful for testing CPU performance, debugging GPU issues, or when GPU is needed for other tasks. CPU processing is significantly slower (10-50x) than GPU but uses less power."
+        value=server_settings.get('force_cpu', False) if server_settings else False,
+        key="force_cpu"
     )
     
     enable_metrics = st.checkbox(
         "Enable Metrics",
-        value=True,
-        help="Enable Prometheus metrics collection for monitoring service performance. Metrics include request counts, processing times, error rates, and chunk statistics. Viewable in the Analytics tab. Minimal performance impact; disable only if metrics endpoint conflicts with other services."
+        value=server_settings.get('enable_metrics', True) if server_settings else True,
+        key="enable_metrics"
     )
     
     st.divider()
     
-    config = {
+    new_config = {
+        "transformer_model_name": selected_model,
+        "transformer_model_version": "main",
+        "use_query_prompt": True,
+        "query_prompt_name": "query",
+        "use_document_prompt": False,
+        "document_prompt_name": None,
         "max_tokens": max_tokens,
         "overlap_ratio": overlap_ratio,
         "min_text_length": min_text_length,
@@ -191,10 +253,27 @@ with st.sidebar:
         "enable_metrics": enable_metrics
     }
     
-    if st.button("📋 Copy Config as JSON", use_container_width=True):
-        st.code(json.dumps(config, indent=2))
+    settings_changed = False
+    if server_settings:
+        for key in new_config:
+            if key in server_settings and new_config[key] != server_settings[key]:
+                settings_changed = True
+                break
     
-    st.caption(f"⚠️ Note: These settings are for reference. The service uses config.py values.")
+    if settings_changed:
+        st.warning("⚠️ Settings have been modified")
+        if st.button("🔄 Apply Changes & Reload Service", type="primary", width="stretch"):
+            with st.spinner("Reloading service with new settings..."):
+                result = reload_service(new_config)
+                if result and result.get('status') == 'success':
+                    st.success(f"✅ {result.get('message')}")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(f"❌ Failed to reload service")
+    
+    if st.button("📋 Copy Config as JSON", width="stretch"):
+        st.code(json.dumps(new_config, indent=2))
 
 tab1, tab2, tab3, tab4 = st.tabs(["📄 Document Embedding", "🔍 Query & Search", "📦 Batch Processing", "📊 Analytics"])
 
@@ -208,7 +287,6 @@ with tab1:
             "Document Source",
             ["Paste Text", "Upload File", "Sample Documents"],
             horizontal=True,
-            help="Choose how to provide the document: paste directly, upload a file, or select from pre-loaded legal opinion samples for testing."
         )
     
     document_text = ""
@@ -219,14 +297,12 @@ with tab1:
             height=400,
             placeholder="Paste your document text here...",
             key="doc_paste",
-            help="Enter the full text of your document. The service will automatically split it into semantically meaningful chunks based on sentence boundaries while respecting the max_tokens limit."
         )
     
     elif doc_source == "Upload File":
         uploaded_file = st.file_uploader(
             "Upload Document",
             type=["txt", "md"],
-            help="Upload a plain text (.txt) or Markdown (.md) file. Maximum file size depends on max_text_length setting. The file will be processed as UTF-8 encoded text."
         )
         if uploaded_file:
             document_text = uploaded_file.read().decode("utf-8")
@@ -235,7 +311,6 @@ with tab1:
                 value=document_text[:1000] + ("..." if len(document_text) > 1000 else ""),
                 height=200,
                 disabled=True,
-                help="Preview of the first 1000 characters of your uploaded document."
             )
     
     elif doc_source == "Sample Documents":
@@ -276,7 +351,6 @@ The judgment is reversed and remanded for proceedings consistent with this opini
         selected_sample = st.selectbox(
             "Select Sample Document",
             list(samples.keys()),
-            help="Choose from pre-loaded legal opinion samples: Short (~100 words), Medium (~150 words), or Long (~500 words). Useful for testing chunking behavior and similarity search."
         )
         document_text = samples[selected_sample]
         st.text_area(
@@ -284,12 +358,11 @@ The judgment is reversed and remanded for proceedings consistent with this opini
             value=document_text,
             height=300,
             disabled=True,
-            help="This is a sample legal opinion demonstrating typical document structure and length for testing the embedding service."
         )
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🚀 Generate Embeddings", type="primary", use_container_width=True):
+        if st.button("🚀 Generate Embeddings", type="primary", width="stretch"):
             if document_text:
                 with st.spinner("Processing document..."):
                     start_time = time.time()
@@ -307,7 +380,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
                 st.warning("Please provide document text")
     
     with col2:
-        if st.button("🗑️ Clear Results", use_container_width=True):
+        if st.button("🗑️ Clear Results", width="stretch"):
             if 'doc_embeddings' in st.session_state:
                 del st.session_state.doc_embeddings
             if 'doc_text' in st.session_state:
@@ -335,7 +408,6 @@ The judgment is reversed and remanded for proceedings consistent with this opini
         chunk_display = st.selectbox(
             "Display Mode",
             ["Expandable Chunks", "Full Text", "Statistics Only"],
-            help="Choose how to view the document chunks: expandable sections (interactive), continuous full text, or statistical summary only."
         )
         
         if chunk_display == "Expandable Chunks":
@@ -368,7 +440,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
                     "Embedding Std": f"{emb_array.std():.4f}",
                     "Embedding Norm": f"{np.linalg.norm(emb_array):.4f}"
                 })
-            st.dataframe(stats_data, use_container_width=True)
+            st.dataframe(stats_data, width="stretch")
 
 with tab2:
     st.header("Query Embedding & Document Search")
@@ -378,12 +450,11 @@ with tab2:
         height=100,
         placeholder="Enter your search query here...",
         key="query_input",
-        help="Enter a natural language query (question or keywords) to search against the embedded document. The service will generate a query embedding and calculate semantic similarity with each document chunk. Queries are typically 1-3 sentences."
     )
     
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("🔍 Embed Query", type="primary", use_container_width=True):
+        if st.button("🔍 Embed Query", type="primary", width="stretch"):
             if query_text:
                 with st.spinner("Generating query embedding..."):
                     start_time = time.time()
@@ -423,12 +494,16 @@ with tab2:
             
             doc_embeddings = st.session_state.doc_embeddings['embeddings']
             
+            doc_embedding_vectors = [chunk_data['embedding'] for chunk_data in doc_embeddings]
+            
+            similarities_tensor = util.cos_sim(qemb, doc_embedding_vectors)
+            similarities_scores = similarities_tensor[0].cpu().numpy()
+            
             similarities = []
-            for chunk_data in doc_embeddings:
-                sim = cosine_similarity(qemb, chunk_data['embedding'])
+            for idx, chunk_data in enumerate(doc_embeddings):
                 similarities.append({
                     'chunk_number': chunk_data['chunk_number'],
-                    'similarity': sim,
+                    'similarity': float(similarities_scores[idx]),
                     'chunk': chunk_data['chunk']
                 })
             
@@ -439,7 +514,6 @@ with tab2:
                 1,
                 len(similarities),
                 min(5, len(similarities)),
-                help="Select how many of the top-ranked chunks to display. Results are ranked by cosine similarity (higher = more similar). Typical searches show 3-10 results."
             )
             
             st.markdown(f"**Top {num_results} Most Similar Chunks:**")
@@ -486,10 +560,9 @@ with tab3:
     num_documents = st.number_input(
         "Number of Documents",
         min_value=1,
-        max_value=max_batch_size,
+        max_value=server_settings.get('max_batch_size', 100) if server_settings else 100,
         value=3,
         step=1,
-        help=f"Specify how many documents to process in this batch. Maximum allowed: {max_batch_size} (set in sidebar). Batch processing is more efficient than individual requests for multiple documents."
     )
     
     batch_documents = []
@@ -501,20 +574,18 @@ with tab3:
                 min_value=0,
                 value=i+1,
                 key=f"batch_id_{i}",
-                help="Unique identifier for this document. Used to track results in the batch response. Can be any non-negative integer."
             )
             doc_text = st.text_area(
                 f"Text",
                 height=150,
                 placeholder=f"Enter text for document {i+1}...",
                 key=f"batch_text_{i}",
-                help="Document text content. Each document will be independently chunked and embedded based on the max_tokens setting."
             )
             batch_documents.append({"id": doc_id, "text": doc_text})
     
     col1, col2 = st.columns([1, 3])
     with col1:
-        if st.button("🚀 Process Batch", type="primary", use_container_width=True):
+        if st.button("🚀 Process Batch", type="primary", width="stretch"):
             valid_docs = [doc for doc in batch_documents if doc["text"].strip()]
             
             if valid_docs:
@@ -557,14 +628,13 @@ with tab3:
                 "Avg Chunk Size": int(sum(len(e['chunk']) for e in doc['embeddings']) / len(doc['embeddings']))
             })
         
-        st.dataframe(summary_data, use_container_width=True)
+        st.dataframe(summary_data, width="stretch")
         
         st.subheader("📑 Detailed Results")
         
         selected_doc = st.selectbox(
             "Select Document to View",
             [f"Document {doc['id']}" for doc in results],
-            help="Choose which document's chunks and embeddings to view in detail."
         )
         
         doc_index = int(selected_doc.split()[-1]) - 1
@@ -594,7 +664,6 @@ with tab4:
                         "Prometheus Metrics",
                         value=metrics_response.text,
                         height=400,
-                        help="Raw Prometheus-format metrics from the embedding service. Includes counters for requests, histograms for processing times, and error counts. Can be scraped by monitoring systems like Prometheus or Grafana."
                     )
                 else:
                     st.warning("Metrics endpoint returned an error")
@@ -631,11 +700,12 @@ with tab4:
         st.divider()
         
         st.subheader("🔧 Configuration Summary")
-        config_df = pd.DataFrame([config]).T
-        config_df.columns = ['Value']
-        st.dataframe(config_df, use_container_width=True)
+        if server_settings:
+            config_df = pd.DataFrame([{k: str(v) for k, v in server_settings.items()}]).T
+            config_df.columns = ['Value']
+            st.dataframe(config_df, width="stretch")
         
-        if st.button("🔄 Reset Session", use_container_width=True):
+        if st.button("🔄 Reset Session", width="stretch"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()

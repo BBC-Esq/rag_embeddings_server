@@ -1,3 +1,4 @@
+# embedding_service.py
 import asyncio
 import threading
 import time
@@ -9,7 +10,7 @@ from nltk.tokenize import sent_tokenize
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
 
-from config import settings
+from config import runtime_settings
 from metrics import CHUNK_COUNT, MODEL_LOAD_TIME
 from schemas import ChunkEmbedding, TextResponse
 from utils import (
@@ -39,7 +40,7 @@ class EmbeddingService:
             self.tokenizer = tokenizer
             device = (
                 "cpu"
-                if settings.force_cpu
+                if runtime_settings.force_cpu
                 else ("cuda" if torch.cuda.is_available() else "cpu")
             )
             if device == "cuda":
@@ -49,6 +50,13 @@ class EmbeddingService:
             self.num_overlap_sentences = int(max_tokens * overlap_ratio)
             self.processing_batch_size = processing_batch_size
             self.max_workers = max_workers
+            
+            self.supports_prompts = hasattr(model, 'prompts') and model.prompts is not None
+            if self.supports_prompts:
+                logger.info(f"Model supports prompts: {list(model.prompts.keys())}")
+            else:
+                logger.info("Model does not support prompts")
+            
             MODEL_LOAD_TIME.observe(time.time() - start_time)
             logger.info(f"Model loaded successfully on {device}")
         except Exception as e:
@@ -56,14 +64,12 @@ class EmbeddingService:
             raise
 
     def get_tokenizer(self) -> AutoTokenizer:
-        """Get the tokenizer instance for the current thread"""
         if not hasattr(thread_local, "tokenizer"):
             thread_local.tokenizer = self.tokenizer
         return thread_local.tokenizer
 
     @staticmethod
     def handle_sent_tokenize(text: str) -> list[str]:
-        """Tokenizes the given text into sentences, retrying on failure."""
         try:
             return sent_tokenize(text)
         except (zipfile.BadZipFile, LookupError):
@@ -78,17 +84,14 @@ class EmbeddingService:
                 raise
 
     def split_text_into_chunks(self, text: str) -> list[str]:
-        """Split text into chunks based on sentences, not exceeding max_tokens, with sentence overlap"""
-
-        # Split the text to sentences & encode sentences with tokenizer
         sentences = self.handle_sent_tokenize(text)
         local_tokenizer = self.get_tokenizer()
         encoded_sentences = [
             local_tokenizer.encode(sentence, add_special_tokens=False)
             for sentence in sentences
         ]
-        lead_text = "search_document: "
-        lead_tokens = local_tokenizer.encode(lead_text)
+        lead_text = ""
+        lead_tokens = [] if not lead_text else local_tokenizer.encode(lead_text)
         lead_len = len(lead_tokens)
         chunks = []
         current_chunks: list[str] = []
@@ -96,35 +99,28 @@ class EmbeddingService:
 
         for sentence_tokens in encoded_sentences:
             sentence_len = len(sentence_tokens)
-            # if the current sentence itself is above max_tokens
             if lead_len + sentence_len > self.max_tokens:
-                # store the previous chunk
                 if current_chunks:
                     chunks.append(lead_text + " ".join(current_chunks))
-                # truncate the sentence and store the truncated sentence as its own chunk
                 truncated_sentence = local_tokenizer.decode(
                     sentence_tokens[: (self.max_tokens - len(lead_tokens))]
                 )
                 chunks.append(lead_text + truncated_sentence)
 
-                # start a new chunk with no overlap (because adding the current sentence will exceed the max_tokens)
                 current_chunks = []
                 current_token_counts = lead_len
                 continue
 
-            # if adding the new sentence will cause the chunk to exceed max_tokens
             if current_token_counts + sentence_len > self.max_tokens:
                 overlap_sentences = current_chunks[
                     -max(0, self.num_overlap_sentences) :
                 ]
-                # store the previous chunk
                 if current_chunks:
                     chunks.append(lead_text + " ".join(current_chunks))
 
                 overlap_token_counts = local_tokenizer.encode(
                     " ".join(overlap_sentences), add_special_tokens=False
                 )
-                # If the sentence with the overlap exceeds the limit, start a new chunk without overlap.
                 if (
                     lead_len + len(overlap_token_counts) + sentence_len
                     > self.max_tokens
@@ -140,34 +136,42 @@ class EmbeddingService:
                     )
                 continue
 
-            # if within max_tokens, continue to add the new sentence to the current chunk
             current_chunks.append(local_tokenizer.decode(sentence_tokens))
             current_token_counts += len(sentence_tokens)
 
-        # store the last chunk if it has any content
         if current_chunks:
             chunks.append(lead_text + " ".join(current_chunks))
         return chunks
 
     async def generate_query_embedding(self, text: str) -> list[float]:
-        """Generate embedding for a single query text"""
-
-        # Preprocess the query text
         processed_text = preprocess_text(text)
 
-        # Use run_in_executor to make the synchronous encode call async
+        encode_kwargs = {
+            "sentences": [processed_text],
+            "batch_size": 1
+        }
+        
+        if (self.supports_prompts and 
+            runtime_settings.use_query_prompt and 
+            runtime_settings.query_prompt_name):
+            if runtime_settings.query_prompt_name in self.model.prompts:
+                encode_kwargs["prompt_name"] = runtime_settings.query_prompt_name
+                logger.debug(f"Using query prompt: {runtime_settings.query_prompt_name}")
+            else:
+                logger.warning(
+                    f"Query prompt '{runtime_settings.query_prompt_name}' not found in model. "
+                    f"Available prompts: {list(self.model.prompts.keys())}"
+                )
+
         embedding = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.gpu_model.encode(
-                sentences=[f"search_query: {processed_text}"], batch_size=1
-            ),
+            lambda: self.gpu_model.encode(**encode_kwargs),
         )
         return embedding[0].tolist()
 
     async def generate_text_embeddings(
         self, texts: dict[int, str]
     ) -> list[TextResponse]:
-        """Generate embeddings for a dict of texts"""
         if not texts:
             raise ValueError("Empty text dict")
 
@@ -175,7 +179,6 @@ class EmbeddingService:
 
         start_time = time.time()
 
-        # Chunk the texts
         all_chunks = []
         chunk_counts = []
         chunks_by_id = {}
@@ -204,12 +207,26 @@ class EmbeddingService:
             f"Producing {len(all_chunks)} chunks took {chunk_time - start_time:.2f} seconds"
         )
 
-        # Generate embeddings
+        encode_kwargs = {
+            "sentences": all_chunks,
+            "batch_size": self.processing_batch_size
+        }
+        
+        if (self.supports_prompts and 
+            runtime_settings.use_document_prompt and 
+            runtime_settings.document_prompt_name):
+            if runtime_settings.document_prompt_name in self.model.prompts:
+                encode_kwargs["prompt_name"] = runtime_settings.document_prompt_name
+                logger.debug(f"Using document prompt: {runtime_settings.document_prompt_name}")
+            else:
+                logger.warning(
+                    f"Document prompt '{runtime_settings.document_prompt_name}' not found in model. "
+                    f"Available prompts: {list(self.model.prompts.keys())}"
+                )
+
         embeddings = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.gpu_model.encode(
-                sentences=all_chunks, batch_size=self.processing_batch_size
-            ),
+            lambda: self.gpu_model.encode(**encode_kwargs),
         )
 
         embed_time = time.time()
@@ -217,17 +234,14 @@ class EmbeddingService:
             f"Generating embedding took {embed_time - chunk_time:.2f} seconds"
         )
 
-        # Clean up the chunks
         clean_chunks = [
-            chunk.replace("search_document: ", "") for chunk in all_chunks
+            chunk.replace("", "") for chunk in all_chunks
         ]
 
-        # Clean up the embeddings
         results = []
         embedding_idx = 0
 
         for doc_id, chunk_count in zip(chunks_by_id.keys(), chunk_counts):
-            # Slice the embeddings for the current document's chunks
             document_embeddings = embeddings[
                 embedding_idx : embedding_idx + chunk_count
             ]
@@ -235,7 +249,6 @@ class EmbeddingService:
                 embedding_idx : embedding_idx + chunk_count
             ]
 
-            # Store embeddings for the current document
             doc_results = [
                 ChunkEmbedding(
                     chunk_number=idx + 1,
@@ -248,7 +261,6 @@ class EmbeddingService:
             ]
             results.append(TextResponse(id=doc_id, embeddings=doc_results))
 
-            # Increment index for the next document
             embedding_idx += chunk_count
 
         end_time = time.time()
@@ -258,6 +270,5 @@ class EmbeddingService:
 
     @staticmethod
     def cleanup_gpu_memory():
-        """Clean up GPU memory if available"""
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

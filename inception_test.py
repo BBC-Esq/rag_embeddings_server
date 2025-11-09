@@ -1,4 +1,3 @@
-# inception_test.py
 import streamlit as st
 import requests
 import json
@@ -141,23 +140,22 @@ with st.sidebar:
     
     st.subheader("Model Parameters")
     
-    max_tokens = st.number_input(
-        "Max Tokens per Chunk",
-        min_value=256,
-        max_value=10000,
-        value=server_settings.get('max_tokens', 512) if server_settings else 512,
-        step=64,
-        key="max_tokens"
+    chunk_size = st.number_input(
+        "Chunk Size (characters)",
+        min_value=100,
+        max_value=100000,
+        value=server_settings.get('chunk_size', 2048) if server_settings else 2048,
+        step=128,
+        key="chunk_size"
     )
     
-    overlap_ratio = st.slider(
-        "Overlap Ratio",
-        min_value=0.0,
-        max_value=0.01,
-        value=server_settings.get('overlap_ratio', 0.004) if server_settings else 0.004,
-        step=0.001,
-        format="%.3f",
-        key="overlap_ratio"
+    chunk_overlap = st.number_input(
+        "Chunk Overlap (characters)",
+        min_value=0,
+        max_value=10000,
+        value=server_settings.get('chunk_overlap', 200) if server_settings else 200,
+        step=50,
+        key="chunk_overlap"
     )
     
     st.subheader("Text Constraints")
@@ -241,8 +239,8 @@ with st.sidebar:
         "query_prompt_name": "query",
         "use_document_prompt": False,
         "document_prompt_name": None,
-        "max_tokens": max_tokens,
-        "overlap_ratio": overlap_ratio,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
         "min_text_length": min_text_length,
         "max_query_length": max_query_length,
         "max_text_length": max_text_length,
@@ -262,7 +260,7 @@ with st.sidebar:
     
     if settings_changed:
         st.warning("⚠️ Settings have been modified")
-        if st.button("🔄 Apply Changes & Reload Service", type="primary", width="stretch"):
+        if st.button("🔄 Apply Changes & Reload Service", type="primary", use_container_width=True):
             with st.spinner("Reloading service with new settings..."):
                 result = reload_service(new_config)
                 if result and result.get('status') == 'success':
@@ -272,7 +270,7 @@ with st.sidebar:
                 else:
                     st.error(f"❌ Failed to reload service")
     
-    if st.button("📋 Copy Config as JSON", width="stretch"):
+    if st.button("📋 Copy Config as JSON", use_container_width=True):
         st.code(json.dumps(new_config, indent=2))
 
 tab1, tab2, tab3, tab4 = st.tabs(["📄 Document Embedding", "🔍 Query & Search", "📦 Batch Processing", "📊 Analytics"])
@@ -362,7 +360,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🚀 Generate Embeddings", type="primary", width="stretch"):
+        if st.button("🚀 Generate Embeddings", type="primary", use_container_width=True):
             if document_text:
                 with st.spinner("Processing document..."):
                     start_time = time.time()
@@ -380,7 +378,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
                 st.warning("Please provide document text")
     
     with col2:
-        if st.button("🗑️ Clear Results", width="stretch"):
+        if st.button("🗑️ Clear Results", use_container_width=True):
             if 'doc_embeddings' in st.session_state:
                 del st.session_state.doc_embeddings
             if 'doc_text' in st.session_state:
@@ -440,7 +438,7 @@ The judgment is reversed and remanded for proceedings consistent with this opini
                     "Embedding Std": f"{emb_array.std():.4f}",
                     "Embedding Norm": f"{np.linalg.norm(emb_array):.4f}"
                 })
-            st.dataframe(stats_data, width="stretch")
+            st.dataframe(stats_data, use_container_width=True)
 
 with tab2:
     st.header("Query Embedding & Document Search")
@@ -454,7 +452,7 @@ with tab2:
     
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("🔍 Embed Query", type="primary", width="stretch"):
+        if st.button("🔍 Embed Query", type="primary", use_container_width=True):
             if query_text:
                 with st.spinner("Generating query embedding..."):
                     start_time = time.time()
@@ -585,7 +583,7 @@ with tab3:
     
     col1, col2 = st.columns([1, 3])
     with col1:
-        if st.button("🚀 Process Batch", type="primary", width="stretch"):
+        if st.button("🚀 Process Batch", type="primary", use_container_width=True):
             valid_docs = [doc for doc in batch_documents if doc["text"].strip()]
             
             if valid_docs:
@@ -628,7 +626,7 @@ with tab3:
                 "Avg Chunk Size": int(sum(len(e['chunk']) for e in doc['embeddings']) / len(doc['embeddings']))
             })
         
-        st.dataframe(summary_data, width="stretch")
+        st.dataframe(summary_data, use_container_width=True)
         
         st.subheader("📑 Detailed Results")
         
@@ -703,9 +701,9 @@ with tab4:
         if server_settings:
             config_df = pd.DataFrame([{k: str(v) for k, v in server_settings.items()}]).T
             config_df.columns = ['Value']
-            st.dataframe(config_df, width="stretch")
+            st.dataframe(config_df, use_container_width=True)
         
-        if st.button("🔄 Reset Session", width="stretch"):
+        if st.button("🔄 Reset Session", use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()

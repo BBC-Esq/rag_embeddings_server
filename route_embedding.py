@@ -1,4 +1,3 @@
-# route_embedding.py
 import time
 from http import HTTPStatus
 
@@ -70,9 +69,7 @@ async def create_text_embedding(request: Request):
         result = await embedding_service.generate_text_embeddings({0: text})
 
         text_length = len(text.strip())
-        if (
-            text_length > runtime_settings.max_tokens * 10
-        ):
+        if text_length > runtime_settings.chunk_size * 10:
             embedding_service.cleanup_gpu_memory()
 
         PROCESSING_TIME.labels(endpoint="text").observe(

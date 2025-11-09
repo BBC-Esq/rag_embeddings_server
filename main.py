@@ -54,9 +54,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 import app_state
 from service_loader import load_embedding_service
-from utils import handle_nltk_download, logger
-
-handle_nltk_download()
+from utils import logger
 
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
@@ -67,7 +65,6 @@ sentry_sdk.init(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Handle application startup and shutdown."""
     await load_embedding_service()
     
     try:

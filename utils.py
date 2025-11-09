@@ -1,4 +1,3 @@
-# utils.py
 import platform
 import sys
 import os
@@ -6,10 +5,8 @@ import shutil
 from pathlib import Path
 import logging
 import re
-import zipfile
 from http import HTTPStatus
 
-import nltk
 from fastapi import HTTPException
 from torch.cuda import OutOfMemoryError
 
@@ -81,24 +78,6 @@ def clean_triton_cache():
     else:
         logger.debug("No Triton cache found to clean")
         return True
-
-
-def download_nltk_resources():
-    nltk.download("punkt", quiet=True, force=True)
-    nltk.download("punkt_tab", quiet=True, force=True)
-
-
-def verify_nltk_resources():
-    nltk.data.find("tokenizers/punkt_tab")
-
-
-def handle_nltk_download():
-    try:
-        verify_nltk_resources()
-    except (LookupError, zipfile.BadZipFile):
-        download_nltk_resources()
-    except FileExistsError:
-        verify_nltk_resources()
 
 
 def clean_text_for_json(text: str) -> str | None:

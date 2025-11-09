@@ -1,24 +1,16 @@
-# embedding_service.py
 import asyncio
 import threading
 import time
-import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import torch
-from nltk.tokenize import sent_tokenize
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
 
 from config import runtime_settings
 from metrics import CHUNK_COUNT, MODEL_LOAD_TIME
 from schemas import ChunkEmbedding, TextResponse
-from utils import (
-    download_nltk_resources,
-    logger,
-    preprocess_text,
-    verify_nltk_resources,
-)
+from utils import logger, preprocess_text
 
 torch.set_float32_matmul_precision("high")
 thread_local = threading.local()
@@ -29,8 +21,8 @@ class EmbeddingService:
         self,
         model: SentenceTransformer,
         tokenizer: AutoTokenizer,
-        max_tokens: int,
-        overlap_ratio: float,
+        chunk_size: int,
+        chunk_overlap: int,
         processing_batch_size: int,
         max_workers: int,
     ):
@@ -46,8 +38,8 @@ class EmbeddingService:
             if device == "cuda":
                 logger.info(f"CUDA device: {torch.cuda.current_device()}")
             self.gpu_model = model.to(device)
-            self.max_tokens = max_tokens
-            self.num_overlap_sentences = int(max_tokens * overlap_ratio)
+            self.chunk_size = chunk_size
+            self.chunk_overlap = chunk_overlap
             self.processing_batch_size = processing_batch_size
             self.max_workers = max_workers
             
@@ -68,94 +60,32 @@ class EmbeddingService:
             thread_local.tokenizer = self.tokenizer
         return thread_local.tokenizer
 
-    @staticmethod
-    def handle_sent_tokenize(text: str) -> list[str]:
-        try:
-            return sent_tokenize(text)
-        except (zipfile.BadZipFile, LookupError):
-            download_nltk_resources()
-            try:
-                verify_nltk_resources()
-                return sent_tokenize(text)
-            except Exception as e:
-                logger.error(
-                    f"Sentence tokenization failed after retry: {str(e)}"
-                )
-                raise
-
     def split_text_into_chunks(self, text: str) -> list[str]:
-        sentences = self.handle_sent_tokenize(text)
-        local_tokenizer = self.get_tokenizer()
-        encoded_sentences = [
-            local_tokenizer.encode(sentence, add_special_tokens=False)
-            for sentence in sentences
-        ]
-        lead_text = ""
-        lead_tokens = [] if not lead_text else local_tokenizer.encode(lead_text)
-        lead_len = len(lead_tokens)
         chunks = []
-        current_chunks: list[str] = []
-        current_token_counts = len(lead_tokens)
-
-        for sentence_tokens in encoded_sentences:
-            sentence_len = len(sentence_tokens)
-            if lead_len + sentence_len > self.max_tokens:
-                if current_chunks:
-                    chunks.append(lead_text + " ".join(current_chunks))
-                truncated_sentence = local_tokenizer.decode(
-                    sentence_tokens[: (self.max_tokens - len(lead_tokens))]
-                )
-                chunks.append(lead_text + truncated_sentence)
-
-                current_chunks = []
-                current_token_counts = lead_len
-                continue
-
-            if current_token_counts + sentence_len > self.max_tokens:
-                overlap_sentences = current_chunks[
-                    -max(0, self.num_overlap_sentences) :
-                ]
-                if current_chunks:
-                    chunks.append(lead_text + " ".join(current_chunks))
-
-                overlap_token_counts = local_tokenizer.encode(
-                    " ".join(overlap_sentences), add_special_tokens=False
-                )
-                if (
-                    lead_len + len(overlap_token_counts) + sentence_len
-                    > self.max_tokens
-                ):
-                    current_chunks = [local_tokenizer.decode(sentence_tokens)]
-                    current_token_counts = lead_len + sentence_len
-                else:
-                    current_chunks = overlap_sentences + [
-                        local_tokenizer.decode(sentence_tokens)
-                    ]
-                    current_token_counts = (
-                        lead_len + len(overlap_token_counts) + sentence_len
-                    )
-                continue
-
-            current_chunks.append(local_tokenizer.decode(sentence_tokens))
-            current_token_counts += len(sentence_tokens)
-
-        if current_chunks:
-            chunks.append(lead_text + " ".join(current_chunks))
-        return chunks
+        start = 0
+        text_length = len(text)
+        
+        while start < text_length:
+            end = start + self.chunk_size
+            chunk = text[start:end]
+            if chunk:
+                chunks.append(chunk)
+            start += self.chunk_size - self.chunk_overlap
+            
+            if start >= text_length:
+                break
+        
+        return chunks if chunks else [text]
 
     async def generate_query_embedding(self, text: str) -> list[float]:
         processed_text = preprocess_text(text)
 
-        encode_kwargs = {
-            "sentences": [processed_text],
-            "batch_size": 1
-        }
-        
+        prompt_name = None
         if (self.supports_prompts and 
             runtime_settings.use_query_prompt and 
             runtime_settings.query_prompt_name):
             if runtime_settings.query_prompt_name in self.model.prompts:
-                encode_kwargs["prompt_name"] = runtime_settings.query_prompt_name
+                prompt_name = runtime_settings.query_prompt_name
                 logger.debug(f"Using query prompt: {runtime_settings.query_prompt_name}")
             else:
                 logger.warning(
@@ -165,7 +95,12 @@ class EmbeddingService:
 
         embedding = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.gpu_model.encode(**encode_kwargs),
+            lambda: self.gpu_model.encode(
+                [processed_text],
+                batch_size=1,
+                prompt_name=prompt_name,
+                normalize_embeddings=True
+            ),
         )
         return embedding[0].tolist()
 
@@ -207,16 +142,12 @@ class EmbeddingService:
             f"Producing {len(all_chunks)} chunks took {chunk_time - start_time:.2f} seconds"
         )
 
-        encode_kwargs = {
-            "sentences": all_chunks,
-            "batch_size": self.processing_batch_size
-        }
-        
+        prompt_name = None
         if (self.supports_prompts and 
             runtime_settings.use_document_prompt and 
             runtime_settings.document_prompt_name):
             if runtime_settings.document_prompt_name in self.model.prompts:
-                encode_kwargs["prompt_name"] = runtime_settings.document_prompt_name
+                prompt_name = runtime_settings.document_prompt_name
                 logger.debug(f"Using document prompt: {runtime_settings.document_prompt_name}")
             else:
                 logger.warning(
@@ -226,7 +157,11 @@ class EmbeddingService:
 
         embeddings = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.gpu_model.encode(**encode_kwargs),
+            lambda: self.gpu_model.encode(
+                all_chunks,
+                batch_size=self.processing_batch_size,
+                prompt_name=prompt_name
+            ),
         )
 
         embed_time = time.time()

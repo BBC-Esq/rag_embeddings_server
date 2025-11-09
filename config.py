@@ -1,4 +1,3 @@
-# config.py
 from enum import Enum
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -34,14 +33,11 @@ class Settings(BaseSettings):
         None,
         description="Name of the prompt to use for document embeddings (if model supports it)",
     )
-    max_tokens: int = Field(
-        512, ge=256, le=10000, description="Maximum tokens per chunk"
+    chunk_size: int = Field(
+        2048, ge=100, le=100000, description="Chunk size in characters"
     )
-    overlap_ratio: float = Field(
-        0.004,
-        ge=0,
-        le=0.01,
-        description="Ratio to calculate number of sentence overlap between chunks",
+    chunk_overlap: int = Field(
+        200, ge=0, le=10000, description="Chunk overlap in characters"
     )
     min_text_length: int = 1
     max_query_length: int = 1000
@@ -69,8 +65,8 @@ class RuntimeSettings:
         self.query_prompt_name = settings.query_prompt_name
         self.use_document_prompt = settings.use_document_prompt
         self.document_prompt_name = settings.document_prompt_name
-        self.max_tokens = settings.max_tokens
-        self.overlap_ratio = settings.overlap_ratio
+        self.chunk_size = settings.chunk_size
+        self.chunk_overlap = settings.chunk_overlap
         self.min_text_length = settings.min_text_length
         self.max_query_length = settings.max_query_length
         self.max_text_length = settings.max_text_length

@@ -1,4 +1,3 @@
-# service_loader.py
 import asyncio
 
 import torch
@@ -35,6 +34,10 @@ async def load_embedding_service(custom_settings=None):
                 model_kwargs={
                     "attn_implementation": "sdpa",
                     "torch_dtype": torch.float32
+                },
+                tokenizer_kwargs={
+                    "padding_side": "left",
+                    "model_max_length": 8192
                 }
             )
             
@@ -43,8 +46,8 @@ async def load_embedding_service(custom_settings=None):
             app_state.embedding_service = EmbeddingService(
                 model=model,
                 tokenizer=tokenizer,
-                max_tokens=settings_to_use.max_tokens,
-                overlap_ratio=settings_to_use.overlap_ratio,
+                chunk_size=settings_to_use.chunk_size,
+                chunk_overlap=settings_to_use.chunk_overlap,
                 processing_batch_size=settings_to_use.processing_batch_size,
                 max_workers=settings_to_use.max_workers,
             )

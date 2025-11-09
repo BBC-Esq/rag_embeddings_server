@@ -1,4 +1,3 @@
-# route_monitoring.py
 import torch
 from fastapi import APIRouter, HTTPException, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -19,8 +18,8 @@ class ReloadSettings(BaseModel):
     query_prompt_name: str
     use_document_prompt: bool
     document_prompt_name: str | None
-    max_tokens: int
-    overlap_ratio: float
+    chunk_size: int
+    chunk_overlap: int
     min_text_length: int
     max_query_length: int
     max_text_length: int
@@ -124,8 +123,8 @@ async def get_current_settings():
         "query_prompt_name": runtime_settings.query_prompt_name,
         "use_document_prompt": runtime_settings.use_document_prompt,
         "document_prompt_name": runtime_settings.document_prompt_name,
-        "max_tokens": runtime_settings.max_tokens,
-        "overlap_ratio": runtime_settings.overlap_ratio,
+        "chunk_size": runtime_settings.chunk_size,
+        "chunk_overlap": runtime_settings.chunk_overlap,
         "min_text_length": runtime_settings.min_text_length,
         "max_query_length": runtime_settings.max_query_length,
         "max_text_length": runtime_settings.max_text_length,

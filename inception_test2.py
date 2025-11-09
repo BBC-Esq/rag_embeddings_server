@@ -225,11 +225,6 @@ class InceptionGUI(QMainWindow):
         self.force_cpu_check.stateChanged.connect(self.settings_changed)
         system_layout.addWidget(self.force_cpu_check)
         
-        self.enable_metrics_check = QCheckBox("Enable Metrics")
-        self.enable_metrics_check.setChecked(True)
-        self.enable_metrics_check.stateChanged.connect(self.settings_changed)
-        system_layout.addWidget(self.enable_metrics_check)
-        
         system_group.setLayout(system_layout)
         layout.addWidget(system_group)
         
@@ -483,7 +478,6 @@ class InceptionGUI(QMainWindow):
         self.processing_batch_spin.setValue(settings.get('processing_batch_size', 8))
         self.max_workers_spin.setValue(settings.get('max_workers', 4))
         self.force_cpu_check.setChecked(settings.get('force_cpu', False))
-        self.enable_metrics_check.setChecked(settings.get('enable_metrics', True))
         
         self.apply_btn.setEnabled(False)
     
@@ -503,8 +497,7 @@ class InceptionGUI(QMainWindow):
             "max_batch_size": self.max_batch_spin.value(),
             "processing_batch_size": self.processing_batch_spin.value(),
             "max_workers": self.max_workers_spin.value(),
-            "force_cpu": self.force_cpu_check.isChecked(),
-            "enable_metrics": self.enable_metrics_check.isChecked()
+            "force_cpu": self.force_cpu_check.isChecked()
         }
     
     def reload_service(self):

@@ -8,14 +8,10 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
 
 from config import runtime_settings
-from metrics import CHUNK_COUNT, MODEL_LOAD_TIME
 from schemas import ChunkEmbedding, TextResponse
 from utils import logger, preprocess_text
 
-torch.set_float32_matmul_precision("highest")
-# "highest"  # Full float32 precision (slowest, most accurate)
-# "high"     # TF32 on Ampere+ GPUs (faster, minimal accuracy loss) ← You're using this
-# "medium"   # Even lower precision (fastest, more accuracy loss)
+torch.set_float32_matmul_precision("high") # highest, high or medium
 thread_local = threading.local()
 
 
@@ -52,8 +48,8 @@ class EmbeddingService:
             else:
                 logger.info("Model does not support prompts")
             
-            MODEL_LOAD_TIME.observe(time.time() - start_time)
-            logger.info(f"Model loaded successfully on {device}")
+            elapsed = time.time() - start_time
+            logger.info(f"Model loaded successfully on {device} in {elapsed:.2f}s")
         except Exception as e:
             logger.error(f"Failed to initialize embedding service: {str(e)}")
             raise
@@ -103,6 +99,8 @@ class EmbeddingService:
 
         start_time = time.time()
 
+        preprocessed_texts = {doc_id: preprocess_text(text) for doc_id, text in texts.items()}
+
         all_chunks = []
         chunk_counts = []
         chunks_by_id = {}
@@ -116,12 +114,11 @@ class EmbeddingService:
                     ),
                     item,
                 ): item[0]
-                for item in texts.items()
+                for item in preprocessed_texts.items()
             }
 
             for future in as_completed(futures):
                 doc_id, chunks = future.result()
-                CHUNK_COUNT.labels(endpoint="text").inc(len(chunks))
                 all_chunks.extend(chunks)
                 chunk_counts.append(len(chunks))
                 chunks_by_id[doc_id] = chunks

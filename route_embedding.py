@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Request
 import app_state
 from config import runtime_settings
 from embedding_service import EmbeddingService
-from metrics import ERROR_COUNT, PROCESSING_TIME, REQUEST_COUNT
 from schemas import (
     BatchTextRequest,
     QueryRequest,
@@ -27,9 +26,6 @@ def check_embedding_service(
     embedding_service: EmbeddingService | None, endpoint: str
 ) -> EmbeddingService:
     if embedding_service is None:
-        ERROR_COUNT.labels(
-            endpoint=endpoint, error_type="service_unavailable"
-        ).inc()
         raise HTTPException(
             status_code=503,
             detail="Embedding service not initialized",
@@ -39,7 +35,6 @@ def check_embedding_service(
 
 @router.post("/api/v1/embed/query", response_model=QueryResponse)
 async def create_query_embedding(request: QueryRequest):
-    REQUEST_COUNT.labels(endpoint="query").inc()
     start_time = time.time()
     embedding_service = check_embedding_service(
         app_state.embedding_service, "query"
@@ -49,9 +44,6 @@ async def create_query_embedding(request: QueryRequest):
         embedding = await embedding_service.generate_query_embedding(
             request.text
         )
-        PROCESSING_TIME.labels(endpoint="query").observe(
-            time.time() - start_time
-        )
         return QueryResponse(embedding=embedding)
     except Exception as e:
         handle_exception(e, "query")
@@ -59,7 +51,6 @@ async def create_query_embedding(request: QueryRequest):
 
 @router.post("/api/v1/embed/text", response_model=TextResponse)
 async def create_text_embedding(request: Request):
-    REQUEST_COUNT.labels(endpoint="text").inc()
     start_time = time.time()
     embedding_service = check_embedding_service(app_state.embedding_service, "text")
     try:
@@ -72,9 +63,6 @@ async def create_text_embedding(request: Request):
         if text_length > runtime_settings.chunk_size * 10:
             embedding_service.cleanup_gpu_memory()
 
-        PROCESSING_TIME.labels(endpoint="text").observe(
-            time.time() - start_time
-        )
         return result[0]
     except Exception as e:
         handle_exception(e, "text")
@@ -82,15 +70,11 @@ async def create_text_embedding(request: Request):
 
 @router.post("/api/v1/embed/batch", response_model=list[TextResponse])
 async def create_batch_text_embeddings(request: BatchTextRequest):
-    REQUEST_COUNT.labels(endpoint="batch").inc()
     start_time = time.time()
     embedding_service = check_embedding_service(
         app_state.embedding_service, "batch"
     )
     if len(request.documents) > runtime_settings.max_batch_size:
-        ERROR_COUNT.labels(
-            endpoint="batch", error_type="batch_too_large"
-        ).inc()
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=f"Batch size exceeds maximum of {runtime_settings.max_batch_size} documents",
@@ -103,9 +87,6 @@ async def create_batch_text_embeddings(request: BatchTextRequest):
         texts = {doc.id: doc.text for doc in request.documents}
         results = await embedding_service.generate_text_embeddings(texts)
         embedding_service.cleanup_gpu_memory()
-        PROCESSING_TIME.labels(endpoint="batch").observe(
-            time.time() - start_time
-        )
         return results
     except Exception as e:
         handle_exception(e, "batch")

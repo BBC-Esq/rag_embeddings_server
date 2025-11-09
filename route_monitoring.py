@@ -1,6 +1,5 @@
 import torch
-from fastapi import APIRouter, HTTPException, Response
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import app_state
@@ -23,7 +22,6 @@ class ReloadSettings(BaseModel):
     processing_batch_size: int
     max_workers: int
     force_cpu: bool
-    enable_metrics: bool
 
 
 @router.get("/")
@@ -118,12 +116,4 @@ async def get_current_settings():
         "processing_batch_size": runtime_settings.processing_batch_size,
         "max_workers": runtime_settings.max_workers,
         "force_cpu": runtime_settings.force_cpu,
-        "enable_metrics": runtime_settings.enable_metrics,
     }
-
-
-@router.get("/metrics")
-async def metrics():
-    if not runtime_settings.enable_metrics:
-        raise HTTPException(status_code=404, detail="Metrics not enabled")
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

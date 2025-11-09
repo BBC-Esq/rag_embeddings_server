@@ -79,7 +79,7 @@ libs = [
     "packaging==25.0",
     "pandas==2.3.3",
     "pillow==12.0.0",
-    "prometheus_client==0.23.1",
+    # "prometheus_client==0.23.1",
     "protobuf==6.33.0",
     "pyarrow==22.0.0",
     "pydantic==2.12.3",
@@ -120,4 +120,6 @@ libs = [
     "watchdog==6.0.0",
 ]
 
-full_install_libs = []
+full_install_libs = [
+    "pyside6",
+]

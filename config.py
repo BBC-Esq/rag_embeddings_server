@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     max_workers: int = 4
     pool_timeout: int = 3600
     force_cpu: bool = False
-    enable_metrics: bool = True
     
     class Config:
         env_file = ".env"
@@ -56,7 +55,6 @@ class RuntimeSettings:
         self.max_workers = settings.max_workers
         self.pool_timeout = settings.pool_timeout
         self.force_cpu = settings.force_cpu
-        self.enable_metrics = settings.enable_metrics
     
     def update(self, **kwargs):
         for key, value in kwargs.items():

@@ -5,6 +5,7 @@ priority_libs = {
         "GPU": [
             "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp311-cp311-win_amd64.whl",
             "https://download.pytorch.org/whl/cu128/torch-2.8.0%2Bcu128-cp311-cp311-win_amd64.whl",
+            "bitsandbytes==0.48.2",
             "triton-windows==3.4.0.post20",
             "nvidia-cuda-runtime-cu12==12.8.90",
             "nvidia-cublas-cu12==12.8.4.1",
@@ -26,6 +27,7 @@ priority_libs = {
         "GPU": [
             "https://github.com/kingbri1/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp312-cp312-win_amd64.whl",
             "https://download.pytorch.org/whl/cu128/torch-2.8.0%2Bcu128-cp312-cp312-win_amd64.whl",
+            "bitsandbytes==0.48.2",
             "triton-windows==3.4.0.post20",
             "nvidia-cuda-runtime-cu12==12.8.90",
             "nvidia-cublas-cu12==12.8.4.1",
@@ -46,6 +48,7 @@ priority_libs = {
 }
 
 libs = [
+    "accelerate==1.11.0",
     "altair==5.5.0",
     "annotated-doc==0.0.3",
     "annotated-types==0.7.0",
@@ -63,6 +66,7 @@ libs = [
     "fsspec[http]==2025.9.0", # datasets requires...
     "gitdb==4.0.12",
     "google==3.0.0",
+    "hf-xet==1.2.0",
     "h11==0.16.0",
     "html2text==2025.4.15",
     "huggingface-hub==0.36.0", # tokenizers requires <1.0

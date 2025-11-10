@@ -12,7 +12,7 @@ from schemas import ChunkEmbedding, TextResponse
 from text_cleaning import preprocess_text
 from utils import logger
 
-torch.set_float32_matmul_precision("highest") # highest, high or medium
+torch.set_float32_matmul_precision("high") # highest, high or medium
 thread_local = threading.local()
 
 
@@ -30,18 +30,34 @@ class EmbeddingService:
         try:
             self.model = model
             self.tokenizer = tokenizer
-            device = (
-                "cpu"
-                if runtime_settings.force_cpu
-                else ("cuda" if torch.cuda.is_available() else "cpu")
-            )
-            if device == "cuda":
-                logger.info(f"CUDA device: {torch.cuda.current_device()}")
-            self.gpu_model = model.to(device)
+            
+            is_quantized = False
+            try:
+                if hasattr(model[0], 'auto_model'):
+                    base_model = model[0].auto_model
+                    is_quantized = hasattr(base_model, 'hf_quantizer') and base_model.hf_quantizer is not None
+            except:
+                pass
+            
+            if is_quantized:
+                logger.info("Model is quantized - skipping device movement")
+                self.gpu_model = model
+                device = "cuda"
+            else:
+                device = (
+                    "cpu"
+                    if runtime_settings.force_cpu
+                    else ("cuda" if torch.cuda.is_available() else "cpu")
+                )
+                if device == "cuda":
+                    logger.info(f"CUDA device: {torch.cuda.current_device()}")
+                self.gpu_model = model.to(device)
+            
             self.chunk_size = chunk_size
             self.chunk_overlap = chunk_overlap
             self.processing_batch_size = processing_batch_size
             self.max_workers = max_workers
+            self.is_quantized = is_quantized
             
             self.supports_prompts = hasattr(model, 'prompts') and model.prompts is not None
             if self.supports_prompts:
@@ -184,3 +200,4 @@ class EmbeddingService:
     def cleanup_gpu_memory():
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()

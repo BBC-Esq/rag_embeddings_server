@@ -32,6 +32,24 @@ class Settings(BaseSettings):
     max_workers: int = 4
     pool_timeout: int = 3600
     force_cpu: bool = False
+    
+    use_quantization: bool = Field(
+        True,
+        description="Enable 4-bit quantization using bitsandbytes"
+    )
+    quantization_type: str = Field(
+        "nf4",
+        description="Quantization type: 'nf4' or 'fp4'"
+    )
+    use_double_quant: bool = Field(
+        True,
+        description="Enable nested quantization for additional memory savings"
+    )
+    compute_dtype: str = Field(
+        "bfloat16",
+        description="Compute dtype: 'bfloat16', 'float16', or 'float32'"
+    )
+    
     text_cleaning_mode: TextCleaningMode = Field(
         TextCleaningMode.UNICODE_SAFE,
         description="Text cleaning mode"
@@ -44,6 +62,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+
 class RuntimeSettings:
     def __init__(self):
         self.transformer_model_name = settings.transformer_model_name
@@ -55,6 +74,10 @@ class RuntimeSettings:
         self.max_workers = settings.max_workers
         self.pool_timeout = settings.pool_timeout
         self.force_cpu = settings.force_cpu
+        self.use_quantization = settings.use_quantization
+        self.quantization_type = settings.quantization_type
+        self.use_double_quant = settings.use_double_quant
+        self.compute_dtype = settings.compute_dtype
         self.text_cleaning_mode = settings.text_cleaning_mode
 
     def update(self, **kwargs):

@@ -205,6 +205,34 @@ class InceptionGUI(QMainWindow):
         system_group.setLayout(system_layout)
         layout.addWidget(system_group)
 
+        quant_group = QGroupBox("Quantization Settings")
+        quant_layout = QVBoxLayout()
+
+        self.use_quant_check = QCheckBox("Enable 4-bit Quantization")
+        self.use_quant_check.setChecked(True)
+        self.use_quant_check.stateChanged.connect(self.settings_changed)
+        quant_layout.addWidget(self.use_quant_check)
+
+        self.quant_type_combo = QComboBox()
+        self.quant_type_combo.addItems(["nf4", "fp4"])
+        self.quant_type_combo.currentTextChanged.connect(self.settings_changed)
+        quant_layout.addWidget(QLabel("Quantization Type:"))
+        quant_layout.addWidget(self.quant_type_combo)
+
+        self.double_quant_check = QCheckBox("Use Double Quantization")
+        self.double_quant_check.setChecked(True)
+        self.double_quant_check.stateChanged.connect(self.settings_changed)
+        quant_layout.addWidget(self.double_quant_check)
+
+        self.compute_dtype_combo = QComboBox()
+        self.compute_dtype_combo.addItems(["bfloat16", "float16", "float32"])
+        self.compute_dtype_combo.currentTextChanged.connect(self.settings_changed)
+        quant_layout.addWidget(QLabel("Compute Dtype:"))
+        quant_layout.addWidget(self.compute_dtype_combo)
+
+        quant_group.setLayout(quant_layout)
+        layout.addWidget(quant_group)
+
         self.apply_btn = QPushButton("Apply Changes & Reload Service")
         self.apply_btn.clicked.connect(self.reload_service)
         self.apply_btn.setEnabled(False)
@@ -536,6 +564,10 @@ class InceptionGUI(QMainWindow):
             "processing_batch_size": self.processing_batch_spin.value(),
             "max_workers": self.max_workers_spin.value(),
             "force_cpu": self.force_cpu_check.isChecked(),
+            "use_quantization": self.use_quant_check.isChecked(),
+            "quantization_type": self.quant_type_combo.currentText(),
+            "use_double_quant": self.double_quant_check.isChecked(),
+            "compute_dtype": self.compute_dtype_combo.currentText(),
             "text_cleaning_mode": cleaning_modes[self.text_cleaning_combo.currentIndex()]
         }
 
@@ -669,7 +701,7 @@ class InceptionGUI(QMainWindow):
         response = requests.post(
             f"{API_BASE_URL}/api/v1/batch/{self.current_batch_id}/collect_files",
             json=collect_request,
-            timeout=60
+            timeout=None
         )
         
         if response.status_code != 200:
@@ -718,7 +750,7 @@ class InceptionGUI(QMainWindow):
     def _extract_texts(self):
         response = requests.post(
             f"{API_BASE_URL}/api/v1/batch/{self.current_batch_id}/extract_texts",
-            timeout=600
+            timeout=None
         )
         
         if response.status_code != 200:
@@ -762,7 +794,7 @@ class InceptionGUI(QMainWindow):
     def _chunk_texts(self):
         response = requests.post(
             f"{API_BASE_URL}/api/v1/batch/{self.current_batch_id}/chunk_texts",
-            timeout=600
+            timeout=None
         )
         
         if response.status_code != 200:
@@ -809,7 +841,7 @@ class InceptionGUI(QMainWindow):
     def _embed_chunks(self):
         response = requests.post(
             f"{API_BASE_URL}/api/v1/batch/{self.current_batch_id}/embed_chunks",
-            timeout=1800
+            timeout=None
         )
         
         if response.status_code != 200:
@@ -925,7 +957,7 @@ class InceptionGUI(QMainWindow):
             f"{API_BASE_URL}/api/v1/embed/text",
             data=text.encode('utf-8'),
             headers={"Content-Type": "text/plain"},
-            timeout=120
+            timeout=None
         )
         elapsed = time.time() - start_time
         if response.status_code == 200:
